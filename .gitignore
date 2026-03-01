@@ -1,0 +1,9 @@
+*.bin
+*.pt
+*.onnx
+venv/
+__pycache__/
+*.pyc
+images_captured/
+*.jpg
+*.png
