@@ -2,9 +2,9 @@
 //  SORTING DASHBOARD — dashboard.js
 // ══════════════════════════════════════════
 
-// ── HORLOGE ──
+// ── CLOCK ──
 function updateClock() {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString('fr-FR');
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');
 }
 setInterval(updateClock, 1000);
 updateClock();
@@ -36,74 +36,72 @@ const pieChart = new Chart(pieCtx, {
   }
 });
 
-// ── STATE LOCAL ──
+// ── LOCAL STATE ──
 const counts = { applicator: 0, ihmulator: 0, sharps: 0, hazardous: 0 };
 const conveyorState = { 1: 'running', 2: 'running' };
 
-// ── MISE À JOUR DES COMPTEURS ──
+// ── UPDATE COUNTERS ──
 function updateCounts(data) {
   Object.assign(counts, data);
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const total = ['applicator', 'ihmulator', 'sharps', 'hazardous']
+    .reduce((a, t) => a + (counts[t] || 0), 0);
+
   document.getElementById('pie-total').textContent = total;
 
   const types = ['applicator', 'ihmulator', 'sharps', 'hazardous'];
   types.forEach((t, i) => {
-    const v = counts[t];
+    const v   = counts[t] || 0;
     const pct = total > 0 ? Math.round(v / total * 100) : 0;
-    document.getElementById(`cnt-${t}`).textContent = v;
-    document.getElementById(`leg-${t}`).textContent = `${v} objects`;
-    document.getElementById(`pct-${t}`).textContent = `${pct}%`;
-    document.getElementById(`bar-${t}`).style.width = `${pct}%`;
+    document.getElementById(`cnt-${t}`).textContent            = v;
+    document.getElementById(`leg-${t}`).textContent            = `${v} objects`;
+    document.getElementById(`pct-${t}`).textContent            = `${pct}%`;
+    document.getElementById(`bar-${t}`).style.width            = `${pct}%`;
     pieChart.data.datasets[0].data[i] = v || 1;
   });
   pieChart.update();
 
-  // Sorting rate (calculé côté serveur et envoyé dans les données)
   if (data.rate !== undefined) {
     document.getElementById('sorting-rate').textContent = data.rate;
   }
-
-  // Taux objets non reconnus / heure
   if (data.unrecognized_rate !== undefined) {
     document.getElementById('unrecognized-rate-value').textContent = data.unrecognized_rate;
   }
 }
 
-// ── CONVOYEUR — BOUTON MANUEL ──
+// ── CONVEYOR — MANUAL TOGGLE ──
 function toggleConveyor(id) {
-  const current = conveyorState[id];
-  const next = current === 'running' ? 'stopped' : 'running';
-  setConveyorState(id, next, next === 'running' ? null : 0);
+  const next = conveyorState[id] === 'running' ? 'stopped' : 'running';
+  setConveyorState(id, next, next === 'stopped' ? 0 : null);
   socket.emit('control_conveyor', { id, command: next === 'running' ? 'start' : 'stop' });
 }
 
 function setConveyorState(id, state, speed) {
   conveyorState[id] = state;
-  const led = document.getElementById(`conveyor-${id}-led`);
-  const txt = document.getElementById(`conveyor-${id}-text`);
-  const btn = document.getElementById(`conveyor-${id}-btn`);
-  const speedEl = document.getElementById(`conveyor-${id}-speed`);
-  const iconStroke = { running: '#22c55e', stopped: '#ef4444', warning: '#f97316' };
 
+  const led     = document.getElementById(`conveyor-${id}-led`);
+  const txt     = document.getElementById(`conveyor-${id}-text`);
+  const btn     = document.getElementById(`conveyor-${id}-btn`);
+  const speedEl = document.getElementById(`conveyor-${id}-speed`);
+
+  const strokeColor = { running: '#22c55e', stopped: '#ef4444', warning: '#f97316' };
   led.className = `conveyor-status-btn ${state}`;
-  led.querySelector('svg').setAttribute('stroke', iconStroke[state] || '#9aa3b8');
+  led.querySelector('svg').setAttribute('stroke', strokeColor[state] || '#9aa3b8');
 
   if (state === 'running') {
     txt.textContent = 'Running';
-    btn.className = 'conveyor-action-btn stop-btn';
+    btn.className   = 'conveyor-action-btn stop-btn';
     btn.textContent = 'Stop';
   } else if (state === 'stopped') {
     txt.textContent = 'Stopped';
-    btn.className = 'conveyor-action-btn start-btn';
+    btn.className   = 'conveyor-action-btn start-btn';
     btn.textContent = 'Start';
     if (speedEl) speedEl.textContent = '0.0 m/s';
   } else {
     txt.textContent = 'Warning — Check system';
-    btn.className = 'conveyor-action-btn stop-btn';
+    btn.className   = 'conveyor-action-btn stop-btn';
     btn.textContent = 'Stop';
   }
 
-  // Mise à jour de la vitesse si fournie
   if (speedEl && speed !== null && speed !== undefined && state !== 'stopped') {
     speedEl.textContent = `${speed} m/s`;
   }
@@ -113,6 +111,7 @@ function setConveyorState(id, state, speed) {
 function setServoState(type, active) {
   const item = document.getElementById(`servo-${type}`);
   if (!item) return;
+
   const wrap   = item.querySelector('.servo-icon-wrap');
   const svg    = item.querySelector('.servo-svg');
   const status = item.querySelector('.servo-status');
@@ -136,91 +135,68 @@ function setWarning(message) {
   document.getElementById('warning-message').textContent = message;
 }
 
-// ── OBJET NON RECONNU ──
+// ── UNRECOGNIZED OBJECT ALERT ──
 let unrecognizedTimeout = null;
 
 function showUnrecognized(message) {
   const alertEl = document.getElementById('unrecognized-alert');
   const msgEl   = document.getElementById('unrecognized-message');
-
-  msgEl.textContent = message;
+  msgEl.textContent   = message;
   alertEl.style.display = 'flex';
 
-  // Auto-masquage après 6 secondes
   clearTimeout(unrecognizedTimeout);
   unrecognizedTimeout = setTimeout(() => {
     alertEl.style.display = 'none';
   }, 6000);
 }
 
-// WebSocket for live video stream
-const streamImg = document.getElementById('stream');
-const streamStatus = document.getElementById('stream-status');
-const streamWs = new WebSocket('ws://127.0.0.1:8765');
-streamWs.binaryType = 'arraybuffer';
-let previousUrl = null;
-
-streamWs.onopen = () => {
-  streamStatus.textContent = 'Connected';
-};
-
-streamWs.onmessage = (event) => {
-  const blob = new Blob([event.data], { type: 'image/jpeg' });
-  const url = URL.createObjectURL(blob);
-  if (previousUrl) URL.revokeObjectURL(previousUrl);
-  previousUrl = url;
-  streamImg.src = url;
-  streamStatus.style.display = 'none';
-};
-
-streamWs.onclose = () => {
-  streamStatus.textContent = 'Disconnected';
-  streamStatus.style.display = 'block';
-};
-
-streamWs.onerror = (error) => {
-  console.error('Stream error:', error);
-  streamStatus.textContent = 'Error';
-  streamStatus.style.display = 'block';
-};
-
 // ══════════════════════════════════════════
-//  CONNEXION SOCKET.IO → Flask
+//  SOCKET.IO CONNECTION
 // ══════════════════════════════════════════
 const socket = io();
 
 socket.on('connect', () => {
-  console.log('Connecté au serveur Flask ✅');
+  console.log('Connected to Flask server ✅');
   document.querySelector('.live-dot').style.background = '#22c55e';
 });
 
 socket.on('disconnect', () => {
-  console.log('Déconnecté ❌');
+  console.log('Disconnected ❌');
   document.querySelector('.live-dot').style.background = '#ef4444';
 });
 
-// Compteurs + rate
-socket.on('update_counts', (data) => {
-  updateCounts(data);
-});
+socket.on('update_counts',       (data) => updateCounts(data));
+socket.on('update_conveyor',     (data) => setConveyorState(data.id, data.running ? 'running' : 'stopped', data.speed));
+socket.on('update_servo',        (data) => setServoState(data.type, data.active));
+socket.on('new_alert',           (data) => setWarning(data.message));
+socket.on('unrecognized_object', (data) => showUnrecognized(data.message));
 
-// Convoyeur : état + vitesse
-socket.on('update_conveyor', (data) => {
-  const state = data.running ? 'running' : 'stopped';
-  setConveyorState(data.id, state, data.speed);
-});
+// ══════════════════════════════════════════
+//  LOAD INITIAL STATE FROM DATABASE
+// ══════════════════════════════════════════
+async function loadInitialState() {
+  try {
+    const res  = await fetch('/api/state');
+    const data = await res.json();
 
-// Servo
-socket.on('update_servo', (data) => {
-  setServoState(data.type, data.active);
-});
+    // Restore conveyors
+    data.conveyors.forEach(c => {
+      setConveyorState(c.id, c.running ? 'running' : 'stopped', c.speed);
+    });
 
-// Alerte système
-socket.on('new_alert', (data) => {
-  setWarning(data.message);
-});
+    // Restore servos
+    data.servos.forEach(s => setServoState(s.type, s.active));
 
-// Objet non reconnu
-socket.on('unrecognized_object', (data) => {
-  showUnrecognized(data.message);
-});
+    // Restore counters
+    updateCounts(data.counts);
+
+    // Restore unrecognized count
+    document.getElementById('unrecognized-rate-value').textContent = data.unrecognized || 0;
+
+    console.log('Initial state loaded from database ');
+  } catch (e) {
+    console.warn('Could not load initial state:', e);
+  }
+}
+
+loadInitialState();

@@ -1,3 +1,4 @@
+sorting_dashboard.db
 *.bin
 *.pt
 *.onnx
@@ -7,3 +8,5 @@ __pycache__/
 images_captured/
 *.jpg
 *.png
+*.log
+
