@@ -9,7 +9,7 @@ import numpy as np
 from ultralytics import YOLO
 
 #settings 
-model_file = 'my_model.pt'
+model_file = 'my_model26n.pt'
 video_source = 'picamera0'
 
 # Define and parse user input arguments

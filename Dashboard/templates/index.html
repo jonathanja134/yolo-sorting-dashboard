@@ -55,7 +55,7 @@
           <div class="legend-item">
             <div class="legend-dot" style="background:var(--c-ihmulator)"></div>
             <div class="legend-info">
-              <div class="legend-name">Ihmulator</div>
+              <div class="legend-name">Ihnaler</div>
               <div class="legend-count" id="leg-ihmulator">0 objects</div>
             </div>
             <div class="legend-pct" id="pct-ihmulator">0%</div>
@@ -265,7 +265,7 @@
 <script>
   const wsStreamImg    = document.getElementById('stream');
   const wsStreamStatus = document.getElementById('stream-status');
-  const ws = new WebSocket('ws://192.168.0.131:8765');
+  const ws = new WebSocket(`ws://${window.location.hostname}:8765`);
   ws.binaryType = 'arraybuffer';
   let prevUrl = null;
   let connected = false;

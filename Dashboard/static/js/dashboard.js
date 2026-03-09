@@ -14,7 +14,7 @@ const pieCtx = document.getElementById('pieChart').getContext('2d');
 const pieChart = new Chart(pieCtx, {
   type: 'doughnut',
   data: {
-    labels: ['Applicator', 'Ihmulator', 'Sharps', 'Hazardous'],
+    labels: ['Applicator', 'Ihnaler', 'Sharps', 'Hazardous'],
     datasets: [{
       data: [1, 1, 1, 1],
       backgroundColor: ['#3b82f6', '#a855f7', '#f97316', '#ef4444'],
@@ -37,18 +37,18 @@ const pieChart = new Chart(pieCtx, {
 });
 
 // ── LOCAL STATE ──
-const counts = { applicator: 0, ihmulator: 0, sharps: 0, hazardous: 0 };
+const counts = { applicator: 0, ihnaler: 0, sharps: 0, hazardous: 0 };
 const conveyorState = { 1: 'running', 2: 'running' };
 
 // ── UPDATE COUNTERS ──
 function updateCounts(data) {
   Object.assign(counts, data);
-  const total = ['applicator', 'ihmulator', 'sharps', 'hazardous']
+  const total = ['applicator', 'ihnaler', 'sharps', 'hazardous']
     .reduce((a, t) => a + (counts[t] || 0), 0);
 
   document.getElementById('pie-total').textContent = total;
 
-  const types = ['applicator', 'ihmulator', 'sharps', 'hazardous'];
+  const types = ['applicator', 'ihnaler', 'sharps', 'hazardous'];
   types.forEach((t, i) => {
     const v   = counts[t] || 0;
     const pct = total > 0 ? Math.round(v / total * 100) : 0;

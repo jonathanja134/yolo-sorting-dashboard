@@ -33,7 +33,7 @@ object_types = [
 
 
 # ─────────────────────────────────────────
-# Live Stream Route (YOUR PART)
+# Live Stream Route 
 # ─────────────────────────────────────────
 
 @app.route("/live-stream")

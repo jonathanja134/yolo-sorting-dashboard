@@ -173,14 +173,14 @@ header h1 {
 .pie-wrapper {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 7rem;
   flex: 1;
 }
 
 .pie-container {
   position: relative;
-  width: 160px;
-  height: 160px;
+  width: 320px;
+  height: 320px;
   flex-shrink: 0;
 }
 
@@ -193,14 +193,14 @@ header h1 {
 }
 
 .pie-center .total {
-  font-size: 1.6rem;
+  font-size: 2rem;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1;
 }
 
 .pie-center .label {
-  font-size: 0.65rem;
+  font-size: 1rem;
   color: var(--text-secondary);
   font-weight: 500;
 }
@@ -208,19 +208,19 @@ header h1 {
 .pie-legend {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 1rem;
   flex: 1;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 1rem;
 }
 
 .legend-dot {
-  width: 10px;
-  height: 10px;
+  width: 15px;
+  height: 15px;
   border-radius: 3px;
   flex-shrink: 0;
 }
@@ -228,7 +228,7 @@ header h1 {
 .legend-info { flex: 1; }
 
 .legend-name {
-  font-size: 0.78rem;
+  font-size: 1rem;
   font-weight: 500;
   color: var(--text-primary);
 }
