@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -20,6 +20,16 @@
     <h1>Sorting Control Dashboard</h1>
   </div>
   <div class="header-right">
+
+    <!-- Debug toggle -->
+    <div class="debug-toggle-wrap">
+      <label class="toggle-switch">
+        <input type="checkbox" id="debug-toggle"/>
+        <span class="toggle-slider"></span>
+      </label>
+      <span id="debug-toggle-label">Debug OFF</span>
+    </div>
+
     <div class="live-badge">
       <span class="live-dot"></span>
       LIVE
@@ -53,12 +63,12 @@
             <div class="legend-pct" id="pct-applicator">0%</div>
           </div>
           <div class="legend-item">
-            <div class="legend-dot" style="background:var(--c-ihmulator)"></div>
+            <div class="legend-dot" style="background:var(--c-inhaler)"></div>
             <div class="legend-info">
-              <div class="legend-name">Ihnaler</div>
-              <div class="legend-count" id="leg-ihmulator">0 objects</div>
+              <div class="legend-name">Inhaler</div>
+              <div class="legend-count" id="leg-inhaler">0 objects</div>
             </div>
-            <div class="legend-pct" id="pct-ihmulator">0%</div>
+            <div class="legend-pct" id="pct-inhaler">0%</div>
           </div>
           <div class="legend-item">
             <div class="legend-dot" style="background:var(--c-sharps)"></div>
@@ -108,7 +118,38 @@
     <div class="warning-message" id="warning-message">System nominal. All sorting operations running within expected parameters.</div>
   </div>
 
-  <!-- ── ROW 3: Conveyors | Sorting Rate | Servos ── -->
+  <!-- ── ROW 3: Debug panel (full width, hidden by default) ── -->
+  <div class="debug-row" id="debug-panel">
+    <div class="card">
+      <div class="card-title">Buffer Debug — Live Vote Breakdown</div>
+      <div class="debug-panel-inner">
+
+        <!-- Left: status + meta -->
+        <div class="dbg-meta">
+          <div>
+            <span class="dbg-status idle" id="dbg-status">◌ IDLE</span>
+          </div>
+          <div class="dbg-frames-label">
+            Frames collected: <span id="dbg-frames">0 frames  (min 5)</span>
+          </div>
+          <div class="dbg-gap-wrap">
+            <div class="dbg-gap-track">
+              <div id="dbg-gap-fill" style="width:0%"></div>
+            </div>
+            <span id="dbg-gap-text">Gap: 0/4</span>
+          </div>
+        </div>
+
+        <!-- Right: per-category vote bars -->
+        <div id="dbg-bars">
+          <div class="dbg-empty">Waiting for first detection…</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ROW 4: Conveyors | Sorting Rate | Servos ── -->
   <div class="middle-row">
 
     <div class="card conveyor-card">
@@ -165,19 +206,6 @@
       <div class="card-title">Servo Motors</div>
       <div class="servo-list">
         <div class="servo-item" id="servo-applicator">
-          <div class="servo-icon-wrap active">
-            <svg class="servo-svg spinning" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-            </svg>
-          </div>
-          <div class="servo-info">
-            <div class="servo-name">Servo — Applicator</div>
-            <div class="servo-type-tag">CHANNEL 01</div>
-          </div>
-          <span class="servo-status active">Activated</span>
-        </div>
-        <div class="servo-item" id="servo-ihmulator">
           <div class="servo-icon-wrap inactive">
             <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
               <circle cx="12" cy="12" r="3"/>
@@ -185,8 +213,21 @@
             </svg>
           </div>
           <div class="servo-info">
-            <div class="servo-name">Servo — Ihmulator</div>
-            <div class="servo-type-tag">CHANNEL 02</div>
+            <div class="servo-name">Servo — Applicator</div>
+            <div class="servo-type-tag">CHANNEL 01 · PIN 13</div>
+          </div>
+          <span class="servo-status inactive">Deactivated</span>
+        </div>
+        <div class="servo-item" id="servo-inhaler">
+          <div class="servo-icon-wrap inactive">
+            <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+            </svg>
+          </div>
+          <div class="servo-info">
+            <div class="servo-name">Servo — Inhaler</div>
+            <div class="servo-type-tag">CHANNEL 02 · PIN 12</div>
           </div>
           <span class="servo-status inactive">Deactivated</span>
         </div>
@@ -199,29 +240,29 @@
           </div>
           <div class="servo-info">
             <div class="servo-name">Servo — Sharps</div>
-            <div class="servo-type-tag">CHANNEL 03</div>
+            <div class="servo-type-tag">CHANNEL 03 · PIN 8</div>
           </div>
           <span class="servo-status inactive">Deactivated</span>
         </div>
         <div class="servo-item" id="servo-hazardous">
-          <div class="servo-icon-wrap active">
-            <svg class="servo-svg spinning" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round">
+          <div class="servo-icon-wrap inactive">
+            <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
               <circle cx="12" cy="12" r="3"/>
               <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
             </svg>
           </div>
           <div class="servo-info">
             <div class="servo-name">Servo — Hazardous</div>
-            <div class="servo-type-tag">CHANNEL 04</div>
+            <div class="servo-type-tag">CHANNEL 04 · PIN 7</div>
           </div>
-          <span class="servo-status active">Activated</span>
+          <span class="servo-status inactive">Deactivated</span>
         </div>
       </div>
     </div>
 
   </div>
 
-  <!-- ── ROW 4: Count cards ── -->
+  <!-- ── ROW 5: Count cards ── -->
   <div class="bottom-row">
     <div class="card count-card" style="border-top-color: var(--c-applicator);">
       <div class="card-title">Applicator</div>
@@ -231,12 +272,12 @@
         <div class="count-bar-fill" id="bar-applicator" style="background:var(--c-applicator); width:0%"></div>
       </div>
     </div>
-    <div class="card count-card" style="border-top-color: var(--c-ihmulator);">
-      <div class="card-title">Ihmulator</div>
-      <div class="count-number" id="cnt-ihmulator" style="color:var(--c-ihmulator)">0</div>
+    <div class="card count-card" style="border-top-color: var(--c-inhaler);">
+      <div class="card-title">Inhaler</div>
+      <div class="count-number" id="cnt-inhaler" style="color:var(--c-inhaler)">0</div>
       <div class="count-label">objects sorted</div>
       <div class="count-bar-track">
-        <div class="count-bar-fill" id="bar-ihmulator" style="background:var(--c-ihmulator); width:0%"></div>
+        <div class="count-bar-fill" id="bar-inhaler" style="background:var(--c-inhaler); width:0%"></div>
       </div>
     </div>
     <div class="card count-card" style="border-top-color: var(--c-sharps);">
@@ -257,40 +298,40 @@
     </div>
   </div>
 
-</div>
+</div><!-- end .dashboard -->
 
 <script src="/static/js/dashboard.js"></script>
 
-<!-- Video Stream -->
+<!-- Video WebSocket stream -->
 <script>
   const wsStreamImg    = document.getElementById('stream');
   const wsStreamStatus = document.getElementById('stream-status');
   const ws = new WebSocket(`ws://${window.location.hostname}:8765`);
   ws.binaryType = 'arraybuffer';
-  let prevUrl = null;
+  let prevUrl   = null;
   let connected = false;
-  
+
   ws.onopen = () => {
-      connected = true;
-      wsStreamStatus.classList.add('hidden');
+    connected = true;
+    wsStreamStatus.classList.add('hidden');
   };
   ws.onmessage = (event) => {
-      const blob = new Blob([event.data], { type: 'image/jpeg' });
-      const url  = URL.createObjectURL(blob);
-      if (prevUrl) URL.revokeObjectURL(prevUrl);
-      prevUrl = url;
-      wsStreamImg.src = url;
-      wsStreamStatus.classList.add('hidden');
+    const blob = new Blob([event.data], { type: 'image/jpeg' });
+    const url  = URL.createObjectURL(blob);
+    if (prevUrl) URL.revokeObjectURL(prevUrl);
+    prevUrl = url;
+    wsStreamImg.src = url;
+    wsStreamStatus.classList.add('hidden');
   };
   ws.onclose = () => {
-      if (connected) {
-          wsStreamStatus.textContent = '⚠ Stream disconnected';
-          wsStreamStatus.classList.remove('hidden');
-      }
+    if (connected) {
+      wsStreamStatus.textContent = '⚠ Stream disconnected';
+      wsStreamStatus.classList.remove('hidden');
+    }
   };
   ws.onerror = () => {
-      wsStreamStatus.textContent = '⚠ Connection error';
-      wsStreamStatus.classList.remove('hidden');
+    wsStreamStatus.textContent = '⚠ Connection error';
+    wsStreamStatus.classList.remove('hidden');
   };
 </script>
 

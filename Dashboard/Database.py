@@ -8,11 +8,10 @@ DB_PATH = "sorting_dashboard.db"
 # ══════════════════════════════════════════
 
 def init_db():
-    """Create tables if they don't exist yet."""
+    """Create tables if they don't exist yet (safe to run on existing DB)."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Current conveyor state
     c.execute("""
         CREATE TABLE IF NOT EXISTS conveyors (
             id      INTEGER PRIMARY KEY,
@@ -21,7 +20,6 @@ def init_db():
         )
     """)
 
-    # Current servo state
     c.execute("""
         CREATE TABLE IF NOT EXISTS servos (
             type   TEXT PRIMARY KEY,
@@ -29,7 +27,6 @@ def init_db():
         )
     """)
 
-    # Object counters
     c.execute("""
         CREATE TABLE IF NOT EXISTS counts (
             type  TEXT PRIMARY KEY,
@@ -37,7 +34,6 @@ def init_db():
         )
     """)
 
-    # General stats (unrecognized count, session start)
     c.execute("""
         CREATE TABLE IF NOT EXISTS stats (
             key   TEXT PRIMARY KEY,
@@ -45,7 +41,7 @@ def init_db():
         )
     """)
 
-    # Full event history
+    # Always run — safe on both new and existing databases
     c.execute("""
         CREATE TABLE IF NOT EXISTS events (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,11 +52,11 @@ def init_db():
         )
     """)
 
-    # Default data if tables are empty
+    # Default rows
     c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (1, 1, 1.4)")
     c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (2, 1, 1.2)")
 
-    for t in ["applicator", "ihmulator", "sharps", "hazardous"]:
+    for t in ["applicator", "inhaler", "sharps", "hazardous"]:
         c.execute("INSERT OR IGNORE INTO servos (type, active) VALUES (?, 0)", (t,))
         c.execute("INSERT OR IGNORE INTO counts (type, value) VALUES (?, 0)", (t,))
 
@@ -135,7 +131,9 @@ def get_unrecognized():
 
 def increment_unrecognized():
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("UPDATE stats SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key='unrecognized'")
+    conn.execute(
+        "UPDATE stats SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key='unrecognized'"
+    )
     conn.commit()
     conn.close()
     val = get_unrecognized()
@@ -155,8 +153,10 @@ def get_session_start():
 
 def log_event(category, action, details=None):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO events (timestamp, category, action, details) VALUES (?, ?, ?, ?)",
-                 (datetime.now().isoformat(timespec='seconds'), category, action, details))
+    conn.execute(
+        "INSERT INTO events (timestamp, category, action, details) VALUES (?, ?, ?, ?)",
+        (datetime.now().isoformat(timespec='seconds'), category, action, details)
+    )
     conn.commit()
     conn.close()
 
@@ -167,4 +167,5 @@ def get_recent_events(limit=50):
         (limit,)
     ).fetchall()
     conn.close()
-    return [{"timestamp": r[0], "category": r[1], "action": r[2], "details": r[3]} for r in rows]
+    return [{"timestamp": r[0], "category": r[1], "action": r[2], "details": r[3]}
+            for r in rows]
