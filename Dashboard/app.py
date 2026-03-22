@@ -1,6 +1,13 @@
 """
 app.py  –  Flask + SocketIO backend for the Sorting Control Dashboard.
 
+4 servo categories
+------------------
+  canister    → Servo 1 – Canister
+  sharps      → Servo 2 – Apply Pen / Syringes / Bag
+  applicator  → Servo 3 – Applicator
+  inhaler     → Servo 4 – Inhaler
+
 SocketIO events
 ---------------
   FROM frontend  →  control_conveyor
@@ -22,11 +29,25 @@ from Database import (
     log_event,
 )
 import datetime
+import threading
 
 app      = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 init_db()
+
+# ── 4 servo definitions ───────────────────────────────────────────────────────
+SERVO_DEFINITIONS = {
+    "canister":   {"label": "Servo 1 – Canister",                   "index": 1},
+    "sharps":     {"label": "Servo 2 – Apply Pen / Syringes / Bag", "index": 2},
+    "applicator": {"label": "Servo 3 – Applicator",                 "index": 3},
+    "inhaler":    {"label": "Servo 4 – Inhaler",                    "index": 4},
+}
+
+KNOWN_CATEGORIES = set(SERVO_DEFINITIONS.keys())
+
+# Events worth keeping — connect/disconnect noise is excluded
+LOGGED_CATEGORIES = ["detection", "servo", "sensor", "conveyor"]
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -39,12 +60,14 @@ def index():
 @app.route("/api/state")
 def api_state():
     return jsonify({
-        "conveyors":     list(get_conveyors().values()),
-        "servos":        list(get_servos().values()),
-        "counts":        get_counts(),
-        "unrecognized":  get_unrecognized(),
-        "session_start": get_session_start(),
-        "recent_events": get_recent_events(limit=20),
+        "conveyors":         list(get_conveyors().values()),
+        "servos":            list(get_servos().values()),
+        "servo_definitions": SERVO_DEFINITIONS,
+        "counts":            get_counts(),
+        "unrecognized":      get_unrecognized(),
+        "session_start":     get_session_start(),
+        # Only return meaningful events — no connect/disconnect noise
+        "recent_events":     get_recent_events(limit=50, categories=LOGGED_CATEGORIES),
     })
 
 
@@ -68,30 +91,55 @@ def handle_conveyor_control(data):
 
 @socketio.on("servo_update")
 def handle_servo_update(data):
-    """
-    Payload: { "type": "applicator"|"inhaler"|"sharps"|"hazardous",
-               "active": true|false }
-    """
     servo_type = data.get("type")
     active     = bool(data.get("active", False))
+
+    if servo_type not in SERVO_DEFINITIONS:
+        return
+
     save_servo(servo_type, active)
-    socketio.emit("update_servo", {"type": servo_type, "active": active})
+
+    servo_info = SERVO_DEFINITIONS[servo_type]
+    socketio.emit("update_servo", {
+        "type":   servo_type,
+        "active": active,
+        "index":  servo_info["index"],
+        "label":  servo_info["label"],
+    })
+
+    # Deactivation delay depends on category:
+    #   canister / sharps      → 3 s  (quick divert)
+    #   applicator / inhaler   → 7 s  (longer divert arm travel)
+    DEACTIVATION_DELAY = {
+        "canister":   3.0,
+        "sharps":     3.0,
+        "applicator": 7.0,
+        "inhaler":    7.0,
+    }
+    if active:
+        delay = DEACTIVATION_DELAY.get(servo_type, 3.0)
+        def _deactivate(st=servo_type, si=servo_info, d=delay):
+            import time; time.sleep(d)
+            save_servo(st, False)
+            socketio.emit("update_servo", {
+                "type":   st,
+                "active": False,
+                "index":  si["index"],
+                "label":  si["label"],
+            })
+        threading.Thread(target=_deactivate, daemon=True).start()
 
 
 # ── Proximity sensor telemetry  (Pi → server → browser) ──────────────────────
 
 @socketio.on("sensor_update")
 def handle_sensor_update(data):
-    """
-    Payload: { "id": "sensor_1"|"sensor_2",
-               "triggered": bool, "distance_cm": float|None }
-    """
     sensor_id   = data.get("id")
     triggered   = bool(data.get("triggered", False))
     distance_cm = data.get("distance_cm")
     log_event("sensor",
               f"Sensor {sensor_id} {'TRIGGERED' if triggered else 'clear'}",
-              f"distance={distance_cm}cm")
+              f"distance={distance_cm}cm" if distance_cm is not None else None)
     socketio.emit("update_sensor", {
         "id":          sensor_id,
         "triggered":   triggered,
@@ -103,24 +151,7 @@ def handle_sensor_update(data):
 
 @socketio.on("buffer_update")
 def handle_buffer_update(data):
-    """
-    Live buffer percentages from the Pi's detection buffer.
-    Relayed directly to all dashboard clients for the debug panel.
-
-    Payload shape (from yolo_reader.py):
-    {
-        "collecting":   bool,
-        "total_frames": int,
-        "min_frames":   int,
-        "gap_counter":  int,
-        "gap_limit":    int,
-        "breakdown":    { "applicator": {"count":7,"pct":70}, … },
-        "leader":       "applicator" | null,
-        "committed":    bool   (only on final commit frame)
-        "winner":       str    (only on final commit frame)
-        "confidence":   float  (only on final commit frame)
-    }
-    """
+    # Relay only — not logged to DB (too frequent)
     socketio.emit("buffer_update", data)
 
 
@@ -128,31 +159,17 @@ def handle_buffer_update(data):
 
 @socketio.on("yolo_detection")
 def handle_yolo_detection(data):
-    """
-    Committed detection result after majority-vote buffer.
+    label        = data.get("label", "unrecognized")
+    confidence   = float(data.get("confidence", 0.0))
+    display      = data.get("display", label.capitalize())
+    breakdown    = data.get("breakdown", {})
+    total_frames = data.get("total_frames", 0)
+    timestamp    = datetime.datetime.now().isoformat(timespec="seconds")
 
-    Payload:
-    {
-        "label":        "applicator"|"inhaler"|"sharps"|"hazardous"|"unrecognized",
-        "confidence":   0.94,
-        "display":      "Inhaler blue",
-        "breakdown":    { … },
-        "total_frames": 12
-    }
-    """
-    label       = data.get("label", "unrecognized")
-    confidence  = float(data.get("confidence", 0.0))
-    display     = data.get("display", label.capitalize())
-    breakdown   = data.get("breakdown", {})
-    total_frames= data.get("total_frames", 0)
-    timestamp   = datetime.datetime.now().isoformat(timespec="seconds")
-
-    KNOWN = {"applicator", "inhaler", "sharps", "hazardous"}
-
-    if label in KNOWN:
+    if label in KNOWN_CATEGORIES:
         increment_count(label)
         log_event("detection",
-                  f"Detected '{display}'",
+                  f"Detected '{label.capitalize()}'",
                   f"category={label} confidence={confidence:.0%} frames={total_frames}")
     else:
         label     = "unrecognized"
@@ -178,17 +195,17 @@ def handle_yolo_detection(data):
     })
 
 
-# ── Connection lifecycle ──────────────────────────────────────────────────────
+# ── Connection lifecycle — no DB logging (was flooding the events table) ──────
 
 @socketio.on("connect")
 def on_connect():
-    log_event("system", "Dashboard client connected")
+    # Send servo definitions so the UI can build servo cards
+    socketio.emit("servo_definitions", SERVO_DEFINITIONS)
 
 
 @socketio.on("disconnect")
 def on_disconnect(*args):
-    # newer flask-socketio passes a reason argument — accept and ignore it
-    log_event("system", "Dashboard client disconnected")
+    pass
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

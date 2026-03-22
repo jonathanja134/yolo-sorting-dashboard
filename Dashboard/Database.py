@@ -1,7 +1,17 @@
 import sqlite3
+import os
 from datetime import datetime
 
-DB_PATH = "sorting_dashboard.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sorting_dashboard.db")
+
+# ══════════════════════════════════════════
+#  CATEGORIES
+# ══════════════════════════════════════════
+# applicator  – Servo 3
+# inhaler     – Servo 4
+# sharps      – Servo 2 (Apply Pen / Syringes / Bag)
+# canister    – Servo 1
+CATEGORIES = ["applicator", "inhaler", "sharps", "canister"]
 
 # ══════════════════════════════════════════
 #  INITIALIZATION
@@ -41,7 +51,6 @@ def init_db():
         )
     """)
 
-    # Always run — safe on both new and existing databases
     c.execute("""
         CREATE TABLE IF NOT EXISTS events (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,16 +61,23 @@ def init_db():
         )
     """)
 
-    # Default rows
+    # Default conveyor rows
     c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (1, 1, 1.4)")
     c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (2, 1, 1.2)")
 
-    for t in ["applicator", "inhaler", "sharps", "hazardous"]:
+    # Seed all 4 categories
+    for t in CATEGORIES:
         c.execute("INSERT OR IGNORE INTO servos (type, active) VALUES (?, 0)", (t,))
         c.execute("INSERT OR IGNORE INTO counts (type, value) VALUES (?, 0)", (t,))
 
+    # Remove old 'hazardous' rows if they exist from a previous DB schema
+    c.execute("DELETE FROM servos WHERE type = 'hazardous'")
+    c.execute("DELETE FROM counts WHERE type = 'hazardous'")
+
     c.execute("INSERT OR IGNORE INTO stats (key, value) VALUES ('unrecognized', '0')")
-    c.execute("INSERT OR IGNORE INTO stats (key, value) VALUES ('session_start', ?)",
+
+    # Always update session_start so it reflects the current run
+    c.execute("INSERT OR REPLACE INTO stats (key, value) VALUES ('session_start', ?)",
               (datetime.now().isoformat(),))
 
     conn.commit()
@@ -160,12 +176,24 @@ def log_event(category, action, details=None):
     conn.commit()
     conn.close()
 
-def get_recent_events(limit=50):
+def get_recent_events(limit=50, categories=None):
+    """
+    Return recent events ordered newest-first.
+    Pass categories=["detection","servo",...] to exclude noise like system connect/disconnect.
+    """
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT timestamp, category, action, details FROM events ORDER BY id DESC LIMIT ?",
-        (limit,)
-    ).fetchall()
+    if categories:
+        placeholders = ",".join("?" * len(categories))
+        rows = conn.execute(
+            f"SELECT timestamp, category, action, details FROM events "
+            f"WHERE category IN ({placeholders}) ORDER BY id DESC LIMIT ?",
+            (*categories, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT timestamp, category, action, details FROM events ORDER BY id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
     conn.close()
     return [{"timestamp": r[0], "category": r[1], "action": r[2], "details": r[3]}
             for r in rows]

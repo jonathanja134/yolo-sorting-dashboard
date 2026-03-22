@@ -20,8 +20,6 @@
     <h1>Sorting Control Dashboard</h1>
   </div>
   <div class="header-right">
-
-    <!-- Debug toggle -->
     <div class="debug-toggle-wrap">
       <label class="toggle-switch">
         <input type="checkbox" id="debug-toggle"/>
@@ -29,7 +27,6 @@
       </label>
       <span id="debug-toggle-label">Debug OFF</span>
     </div>
-
     <div class="live-badge">
       <span class="live-dot"></span>
       LIVE
@@ -38,9 +35,11 @@
   </div>
 </header>
 
+<div class="dashboard-layout">
+<div class="dashboard-main">
 <div class="dashboard">
 
-  <!-- ── ROW 1: Pie (left) | Video (right) ── -->
+  <!-- ── ROW 1: Pie | Video ── -->
   <div class="top-row">
 
     <div class="card pie-card">
@@ -79,12 +78,12 @@
             <div class="legend-pct" id="pct-sharps">0%</div>
           </div>
           <div class="legend-item">
-            <div class="legend-dot" style="background:var(--c-hazardous)"></div>
+            <div class="legend-dot" style="background:var(--c-canister)"></div>
             <div class="legend-info">
-              <div class="legend-name">Hazardous</div>
-              <div class="legend-count" id="leg-hazardous">0 objects</div>
+              <div class="legend-name">Canister</div>
+              <div class="legend-count" id="leg-canister">0 objects</div>
             </div>
-            <div class="legend-pct" id="pct-hazardous">0%</div>
+            <div class="legend-pct" id="pct-canister">0%</div>
           </div>
         </div>
       </div>
@@ -106,7 +105,7 @@
 
   </div>
 
-  <!-- ── ROW 2: Warning (full width) ── -->
+  <!-- ── ROW 2: Warning ── -->
   <div class="card warning-card warning-full">
     <div class="warning-header">
       <svg class="warning-icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round">
@@ -118,13 +117,11 @@
     <div class="warning-message" id="warning-message">System nominal. All sorting operations running within expected parameters.</div>
   </div>
 
-  <!-- ── ROW 3: Debug panel (full width, hidden by default) ── -->
+  <!-- ── ROW 3: Debug panel (hidden by default) ── -->
   <div class="debug-row" id="debug-panel">
     <div class="card">
       <div class="card-title">Buffer Debug — Live Vote Breakdown</div>
       <div class="debug-panel-inner">
-
-        <!-- Left: status + meta -->
         <div class="dbg-meta">
           <div>
             <span class="dbg-status idle" id="dbg-status">◌ IDLE</span>
@@ -136,15 +133,12 @@
             <div class="dbg-gap-track">
               <div id="dbg-gap-fill" style="width:0%"></div>
             </div>
-            <span id="dbg-gap-text">Gap: 0/4</span>
+            <span id="dbg-gap-text">Gap: 0/20</span>
           </div>
         </div>
-
-        <!-- Right: per-category vote bars -->
         <div id="dbg-bars">
           <div class="dbg-empty">Waiting for first detection…</div>
         </div>
-
       </div>
     </div>
   </div>
@@ -202,9 +196,42 @@
       </div>
     </div>
 
+    <!-- Servos: canister | sharps (pending) | applicator | inhaler -->
     <div class="card servo-card">
       <div class="card-title">Servo Motors</div>
       <div class="servo-list">
+
+        <!-- Servo 1 — Canister -->
+        <div class="servo-item" id="servo-canister">
+          <div class="servo-icon-wrap inactive">
+            <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+            </svg>
+          </div>
+          <div class="servo-info">
+            <div class="servo-name">Servo 1 — Canister</div>
+            <div class="servo-type-tag">CHANNEL 01 · PIN 13</div>
+          </div>
+          <span class="servo-status inactive">Deactivated</span>
+        </div>
+
+        <!-- Servo 2 — Sharps (pending model support) -->
+        <div class="servo-item pending" id="servo-sharps">
+          <div class="servo-icon-wrap inactive">
+            <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+            </svg>
+          </div>
+          <div class="servo-info">
+            <div class="servo-name">Servo 2 — Sharps</div>
+            <div class="servo-type-tag">CHANNEL 02 · PIN 12  ·  Apply Pen / Syringes / Bag</div>
+          </div>
+          <span class="servo-status inactive">Deactivated</span>
+        </div>
+
+        <!-- Servo 3 — Applicator -->
         <div class="servo-item" id="servo-applicator">
           <div class="servo-icon-wrap inactive">
             <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
@@ -213,11 +240,13 @@
             </svg>
           </div>
           <div class="servo-info">
-            <div class="servo-name">Servo — Applicator</div>
-            <div class="servo-type-tag">CHANNEL 01 · PIN 13</div>
+            <div class="servo-name">Servo 3 — Applicator</div>
+            <div class="servo-type-tag">CHANNEL 03 · PIN 8</div>
           </div>
           <span class="servo-status inactive">Deactivated</span>
         </div>
+
+        <!-- Servo 4 — Inhaler -->
         <div class="servo-item" id="servo-inhaler">
           <div class="servo-icon-wrap inactive">
             <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
@@ -226,37 +255,12 @@
             </svg>
           </div>
           <div class="servo-info">
-            <div class="servo-name">Servo — Inhaler</div>
-            <div class="servo-type-tag">CHANNEL 02 · PIN 12</div>
-          </div>
-          <span class="servo-status inactive">Deactivated</span>
-        </div>
-        <div class="servo-item" id="servo-sharps">
-          <div class="servo-icon-wrap inactive">
-            <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-            </svg>
-          </div>
-          <div class="servo-info">
-            <div class="servo-name">Servo — Sharps</div>
-            <div class="servo-type-tag">CHANNEL 03 · PIN 8</div>
-          </div>
-          <span class="servo-status inactive">Deactivated</span>
-        </div>
-        <div class="servo-item" id="servo-hazardous">
-          <div class="servo-icon-wrap inactive">
-            <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-            </svg>
-          </div>
-          <div class="servo-info">
-            <div class="servo-name">Servo — Hazardous</div>
+            <div class="servo-name">Servo 4 — Inhaler</div>
             <div class="servo-type-tag">CHANNEL 04 · PIN 7</div>
           </div>
           <span class="servo-status inactive">Deactivated</span>
         </div>
+
       </div>
     </div>
 
@@ -264,6 +268,7 @@
 
   <!-- ── ROW 5: Count cards ── -->
   <div class="bottom-row">
+
     <div class="card count-card" style="border-top-color: var(--c-applicator);">
       <div class="card-title">Applicator</div>
       <div class="count-number" id="cnt-applicator" style="color:var(--c-applicator)">0</div>
@@ -272,6 +277,7 @@
         <div class="count-bar-fill" id="bar-applicator" style="background:var(--c-applicator); width:0%"></div>
       </div>
     </div>
+
     <div class="card count-card" style="border-top-color: var(--c-inhaler);">
       <div class="card-title">Inhaler</div>
       <div class="count-number" id="cnt-inhaler" style="color:var(--c-inhaler)">0</div>
@@ -280,7 +286,8 @@
         <div class="count-bar-fill" id="bar-inhaler" style="background:var(--c-inhaler); width:0%"></div>
       </div>
     </div>
-    <div class="card count-card" style="border-top-color: var(--c-sharps);">
+
+    <div class="card count-card pending" style="border-top-color: var(--c-sharps);">
       <div class="card-title">Sharps</div>
       <div class="count-number" id="cnt-sharps" style="color:var(--c-sharps)">0</div>
       <div class="count-label">objects sorted</div>
@@ -288,21 +295,50 @@
         <div class="count-bar-fill" id="bar-sharps" style="background:var(--c-sharps); width:0%"></div>
       </div>
     </div>
-    <div class="card count-card" style="border-top-color: var(--c-hazardous);">
-      <div class="card-title">Hazardous</div>
-      <div class="count-number" id="cnt-hazardous" style="color:var(--c-hazardous)">0</div>
+
+    <div class="card count-card" style="border-top-color: var(--c-canister);">
+      <div class="card-title">Canister</div>
+      <div class="count-number" id="cnt-canister" style="color:var(--c-canister)">0</div>
       <div class="count-label">objects sorted</div>
       <div class="count-bar-track">
-        <div class="count-bar-fill" id="bar-hazardous" style="background:var(--c-hazardous); width:0%"></div>
+        <div class="count-bar-fill" id="bar-canister" style="background:var(--c-canister); width:0%"></div>
       </div>
     </div>
+
   </div>
 
 </div><!-- end .dashboard -->
+</div><!-- end .dashboard-main -->
+
+<!-- ── SIDEBAR: Event Log ── -->
+<div class="dashboard-sidebar" id="debug-log-panel" style="display:none;">
+  <div class="card log-sidebar-card">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>Event Log</span>
+      <button onclick="clearLogDisplay()" style="font-size:0.65rem;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;">Clear</button>
+    </div>
+    <div id="event-log-table-wrap">
+      <table class="event-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Cat.</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="event-log-body">
+          <tr><td colspan="3" class="log-empty">No events yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div><!-- end .dashboard-sidebar -->
+
+</div><!-- end .dashboard-layout -->
 
 <script src="/static/js/dashboard.js"></script>
 
-<!-- Video WebSocket stream -->
+<!-- WebSocket video stream -->
 <script>
   const wsStreamImg    = document.getElementById('stream');
   const wsStreamStatus = document.getElementById('stream-status');
