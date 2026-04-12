@@ -8,6 +8,51 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <link rel="stylesheet" href="/static/css/style.css"/>
+  <style>
+    /* ── Log filter bar ─────────────────────────────── */
+    .log-filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 8px;
+    }
+    .log-filter-btn {
+      font-size: 0.62rem;
+      font-family: 'DM Mono', monospace;
+      padding: 3px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--border, #2e3650);
+      background: transparent;
+      color: var(--text-secondary, #9aa3b8);
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      transition: background 0.15s, color 0.15s;
+    }
+    .log-filter-btn:hover {
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+    }
+    .log-filter-btn.active {
+      color: #fff;
+      border-color: transparent;
+    }
+    .log-filter-btn[data-filter="all"].active    { background: #374151; }
+    .log-filter-btn[data-filter="detection"].active { background: #16a34a; }
+    .log-filter-btn[data-filter="servo"].active  { background: #2563eb; }
+    .log-filter-btn[data-filter="sensor"].active { background: #9333ea; }
+    .log-filter-btn[data-filter="conveyor"].active { background: #0891b2; }
+    .log-filter-btn[data-filter="error"].active  { background: #dc2626; }
+
+    /* ── Log row category colours ──────────────────── */
+    .log-row-detection td:nth-child(2) { color: #4ade80; }
+    .log-row-servo      td:nth-child(2) { color: #60a5fa; }
+    .log-row-sensor     td:nth-child(2) { color: #c084fc; }
+    .log-row-conveyor   td:nth-child(2) { color: #22d3ee; }
+    .log-row-error      td:nth-child(2) { color: #f87171; font-weight: 600; }
+
+    .log-row-hidden { display: none; }
+  </style>
 </head>
 <body>
 
@@ -196,7 +241,7 @@
       </div>
     </div>
 
-    <!-- Servos: canister | sharps (pending) | applicator | inhaler -->
+    <!-- Servos: canister | sharps | applicator | inhaler -->
     <div class="card servo-card">
       <div class="card-title">Servo Motors</div>
       <div class="servo-list">
@@ -213,7 +258,7 @@
             <div class="servo-name">Servo 1 — Canister</div>
             <div class="servo-type-tag">CHANNEL 01 · PIN 13</div>
           </div>
-          <span class="servo-status inactive">Deactivated</span>
+          <span class="servo-status inactive" id="servo-status-canister">Closed</span>
         </div>
 
         <!-- Servo 2 — Sharps (pending model support) -->
@@ -228,7 +273,7 @@
             <div class="servo-name">Servo 2 — Sharps</div>
             <div class="servo-type-tag">CHANNEL 02 · PIN 12  ·  Apply Pen / Syringes / Bag</div>
           </div>
-          <span class="servo-status inactive">Deactivated</span>
+          <span class="servo-status inactive" id="servo-status-sharps">Closed</span>
         </div>
 
         <!-- Servo 3 — Applicator -->
@@ -243,7 +288,7 @@
             <div class="servo-name">Servo 3 — Applicator</div>
             <div class="servo-type-tag">CHANNEL 03 · PIN 8</div>
           </div>
-          <span class="servo-status inactive">Deactivated</span>
+          <span class="servo-status inactive" id="servo-status-applicator">Closed</span>
         </div>
 
         <!-- Servo 4 — Inhaler -->
@@ -258,7 +303,7 @@
             <div class="servo-name">Servo 4 — Inhaler</div>
             <div class="servo-type-tag">CHANNEL 04 · PIN 7</div>
           </div>
-          <span class="servo-status inactive">Deactivated</span>
+          <span class="servo-status inactive" id="servo-status-inhaler">Closed</span>
         </div>
 
       </div>
@@ -317,6 +362,17 @@
       <span>Event Log</span>
       <button onclick="clearLogDisplay()" style="font-size:0.65rem;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;">Clear</button>
     </div>
+
+    <!-- Filter bar -->
+    <div class="log-filter-bar">
+      <button class="log-filter-btn active" data-filter="all">All</button>
+      <button class="log-filter-btn" data-filter="detection">Detection</button>
+      <button class="log-filter-btn" data-filter="servo">Servo</button>
+      <button class="log-filter-btn" data-filter="sensor">Sensor</button>
+      <button class="log-filter-btn" data-filter="conveyor">Conveyor</button>
+      <button class="log-filter-btn" data-filter="error">Error</button>
+    </div>
+
     <div id="event-log-table-wrap">
       <table class="event-log-table">
         <thead>
@@ -337,6 +393,225 @@
 </div><!-- end .dashboard-layout -->
 
 <script src="/static/js/dashboard.js"></script>
+
+<!-- ── Supplementary: log filters + new socket events ─────────────────────── -->
+<script>
+(function () {
+  "use strict";
+
+  // ── Active filter state ───────────────────────────────────────────────────
+  let _activeFilter = "all";
+
+  // ── Wire filter buttons ───────────────────────────────────────────────────
+  document.querySelectorAll(".log-filter-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.querySelectorAll(".log-filter-btn").forEach(function (b) {
+        b.classList.remove("active");
+      });
+      btn.classList.add("active");
+      _activeFilter = btn.dataset.filter;
+      _applyFilter();
+    });
+  });
+
+  function _applyFilter() {
+    var rows = document.querySelectorAll("#event-log-body tr[data-category]");
+    rows.forEach(function (row) {
+      if (_activeFilter === "all" || row.dataset.category === _activeFilter) {
+        row.classList.remove("log-row-hidden");
+      } else {
+        row.classList.add("log-row-hidden");
+      }
+    });
+  }
+
+  // ── Patch log row insertion ───────────────────────────────────────────────
+  // Uses a MutationObserver so this works regardless of how dashboard.js
+  // inserts rows — no need to touch that file.
+  var tbody = document.getElementById("event-log-body");
+
+  var observer = new MutationObserver(function (mutations) {
+    mutations.forEach(function (mut) {
+      mut.addedNodes.forEach(function (node) {
+        if (node.nodeType !== 1 || node.tagName !== "TR") return;
+
+        // Infer category from the second cell (Cat. column)
+        var catCell = node.cells && node.cells[1];
+        if (!catCell) return;
+        var text = catCell.textContent.trim().toLowerCase();
+
+        // Map display text → filter key
+        var cat = "other";
+        if (text.includes("detect") || text.includes("yolo") || text.includes("label")) {
+          cat = "detection";
+        } else if (text.includes("servo")) {
+          cat = "servo";
+        } else if (text.includes("sensor")) {
+          cat = "sensor";
+        } else if (text.includes("conveyor") || text.includes("motor")) {
+          cat = "conveyor";
+        } else if (text.includes("error") || text.includes("err") || text.includes("blocked")) {
+          cat = "error";
+        }
+
+        node.dataset.category = cat;
+        node.classList.add("log-row-" + cat);
+
+        // Apply current filter immediately
+        if (_activeFilter !== "all" && cat !== _activeFilter) {
+          node.classList.add("log-row-hidden");
+        }
+
+        // Remove "no events" placeholder if present
+        var empty = tbody.querySelector(".log-empty");
+        if (empty) empty.parentElement.remove();
+      });
+    });
+  });
+
+  if (tbody) {
+    observer.observe(tbody, { childList: true });
+  }
+
+  // ── Helper: inject a log row directly from this script ───────────────────
+  // Used for events that dashboard.js doesn't know about (errors, status, etc.)
+  function injectLogRow(category, catLabel, action, isError) {
+    var now = new Date();
+    var time = now.toTimeString().slice(0, 8);
+
+    var tr = document.createElement("tr");
+    tr.dataset.category = category;
+    tr.classList.add("log-row-" + category);
+    if (_activeFilter !== "all" && category !== _activeFilter) {
+      tr.classList.add("log-row-hidden");
+    }
+
+    var tdTime   = document.createElement("td");
+    var tdCat    = document.createElement("td");
+    var tdAction = document.createElement("td");
+
+    tdTime.textContent   = time;
+    tdCat.textContent    = catLabel;
+    tdAction.textContent = action;
+
+    if (isError) {
+      tdAction.style.color = "#f87171";
+    }
+
+    tr.appendChild(tdTime);
+    tr.appendChild(tdCat);
+    tr.appendChild(tdAction);
+
+    // Prepend so newest is on top
+    var firstRow = tbody.firstChild;
+    if (firstRow) {
+      tbody.insertBefore(tr, firstRow);
+    } else {
+      tbody.appendChild(tr);
+    }
+
+    var empty = tbody.querySelector(".log-empty");
+    if (empty) empty.parentElement.remove();
+
+    // Keep log bounded at 200 rows
+    var rows = tbody.querySelectorAll("tr[data-category]");
+    if (rows.length > 200) {
+      rows[rows.length - 1].remove();
+    }
+  }
+
+  // ── Warning banner helper ─────────────────────────────────────────────────
+  function setWarning(msg, isError) {
+    var el = document.getElementById("warning-message");
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = isError ? "#f87171" : "";
+  }
+
+  // ── Socket.IO: new events ────────────────────────────────────────────────
+  // The main socket is created by dashboard.js; we reuse window.socket if
+  // it's exposed, or create our own connection on the same server.
+
+  function getSocket() {
+    // dashboard.js typically exposes the socket; fall back to a new connection
+    return window.socket || (window._logSocket = window._logSocket || io());
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var socket = getSocket();
+
+    // ── Arduino errors → warning banner + log ────────────────────────────
+    socket.on("system_error", function (data) {
+      var source = data.source || "system";
+      var detail = data.error  || "unknown error";
+      var msg;
+
+      if (source === "servo") {
+        msg = "Servo " + (data.index || "?") + " (" + (data.servo || "") + "): " + detail;
+      } else {
+        msg = "Arduino ERR [" + source + "]: " + detail;
+      }
+
+      setWarning("⚠ " + msg, true);
+      injectLogRow("error", "Error", msg, true);
+    });
+
+    // ── Servo closed feedback (drives status label update) ────────────────
+    // dashboard.js handles update_servo; this just adds extra log detail.
+    socket.on("update_servo", function (data) {
+      if (data.active === false && data.close_status) {
+        var status = data.close_status === "closed_ok" ? "OK" : "TIMEOUT";
+        injectLogRow("servo", "Servo",
+          "Servo " + data.index + " (" + (data.type || data.label) + ") closed [" + status + "]",
+          data.close_status === "closed_timeout");
+
+        // Servo timeout → warning banner
+        if (data.close_status === "closed_timeout") {
+          setWarning(
+            "⚠ Servo " + data.index + " closed on timeout — object may not have passed.",
+            true
+          );
+        }
+      }
+    });
+
+    // ── Status snapshot → log (concise one-liner) ────────────────────────
+    socket.on("status_snapshot", function (data) {
+      // Build a short summary string
+      var parts = [];
+      if (data.MOTOR)   parts.push("Motor:" + data.MOTOR);
+      if (data.SENSOR1) parts.push("S1:"   + data.SENSOR1);
+      if (data.SENSOR2) parts.push("S2:"   + data.SENSOR2);
+      ["SERVO1","SERVO2","SERVO3","SERVO4"].forEach(function (k) {
+        if (data[k]) parts.push(k + ":" + data[k]);
+      });
+      injectLogRow("sensor", "Status", parts.join(" | "), false);
+    });
+
+    // ── Servo blocked ─────────────────────────────────────────────────────
+    socket.on("servo_object_detected", function (data) {
+      injectLogRow("servo", "Servo",
+        "Servo " + data.index + " (" + data.type + ") object detected", false);
+    });
+
+    // ── System info (INFO: lines) ─────────────────────────────────────────
+    socket.on("system_info", function (data) {
+      injectLogRow("sensor", "Info", data.info || "", false);
+    });
+
+    // ── Change events (CHANGE: lines, for visibility) ─────────────────────
+    // These are already captured in the STATUS snapshot log entry above,
+    // so we only log them if debug panel is visible.
+    socket.on("change_event", function (data) {
+      var dbg = document.getElementById("debug-panel");
+      if (dbg && dbg.style.display !== "none") {
+        injectLogRow("sensor", "Change", data.change || "", false);
+      }
+    });
+  });
+
+})();
+</script>
 
 <!-- WebSocket video stream -->
 <script>

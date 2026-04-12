@@ -3,19 +3,23 @@ yolo_reader.py – YOLO inference + adaptive majority-vote buffer
                   + serial protocol (Pi ↔ Arduino) + SocketIO → Flask
                   + WebSocket MJPEG stream + local cv2 display
 
-Changes vs original:
-  - num_threads = 4 (matches Pi 5 physical cores)
-  - out.numpy().T.copy() avoids intermediate allocation
-  - Removed redundant np.ascontiguousarray() on raw frame
-  - NCNN extractor recreated each frame (no reset() in Python bindings)
-  - Fixed FPS: true frame-to-frame via prev_t
-  - 4 servo categories: canister / sharps / applicator / inhaler
-    Canister label (7) now maps to "canister" instead of "unrecognized"
-  - Keyboard sensor simulation in cv2 window:
-      SPACE  → TRIGGERED (starts buffer)
-      C      → CLEAR     (commits buffer)
-  - Active servo overlay drawn on the cv2 window
-  - servo_update emitted to Flask after every committed detection
+Servo / category mapping (canonical across all files):
+  canister   → Servo 1 – pin 13
+  sharps     → Servo 2 – pin 12
+  applicator → Servo 3 – pin 8
+  inhaler    → Servo 4 – pin 7
+
+Serial protocol (Arduino → Pi):
+  SENSOR:1:TRIGGERED / CLEAR
+  SENSOR:2:TRIGGERED / CLEAR
+  ACK:MOTOR:FORWARD / STOP
+  ACK:LABEL:<category>
+  SERVO:X:OPEN / CLOSED_OK / CLOSED_TIMEOUT / OBJECT_DETECTED / BLOCKED
+  ERR:<detail>
+  INFO:<detail>
+  STATUS:MOTOR:...|SENSOR1:...|SENSOR2:...|SERVO1:..|SERVO2:..|SERVO3:..|SERVO4:..
+  CHANGE:<what changed>
+  ---------------------   (separator lines – ignored)
 """
 
 import gc
@@ -36,30 +40,28 @@ from collections import Counter
 from picamera2 import Picamera2
 import queue
 
-# ── CLI args ──────────────────────────────────────────────────────────────────
+# ── CLI args ────────────────────────────────────────────────────────────────── OK
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', default='yolo11n', help='Model folder')
-parser.add_argument('--serial-port', default='/dev/ttyUSB0', dest='serial_port')
+parser.add_argument('--serial-port', default='/dev/ttyACM0', dest='serial_port')
 parser.add_argument('--baud', default=9600, type=int)
 parser.add_argument('--server-url', default='http://localhost:5000', dest='server_url')
-parser.add_argument('--min-frames', default=5, type=int, dest='min_frames',
-                    help='Minimum detections before committing a label')
-parser.add_argument('--gap-limit', default=20, type=int, dest='gap_limit',
-                    help='Consecutive empty frames before auto-commit')
+parser.add_argument('--min-frames', default=5, type=int, dest='min_frames', help='Minimum detections before committing a label')
+parser.add_argument('--gap-limit', default=20, type=int, dest='gap_limit', help='Consecutive empty frames before auto-commit')
 args = parser.parse_args()
 
-# ── Model paths ───────────────────────────────────────────────────────────────
+# ── Model paths ─────────────────────────────────────────────────────────────── OK
 script_dir = os.path.dirname(os.path.abspath(__file__))
 model_dir  = os.path.join(script_dir, "my_model_ncnn_model", args.model)
 param_file = os.path.join(model_dir, "model.ncnn.param")
 bin_file   = os.path.join(model_dir, "model.ncnn.bin")
 
-# ── Inference config ──────────────────────────────────────────────────────────
+# ── Inference config ────────────────────────────────────────────────────────── OK
 input_size  = 640
 conf_thresh = 0.6
 nms_thresh  = 0.45
 
-# ── Labels ────────────────────────────────────────────────────────────────────
+# ── Labels ──────────────────────────────────────────────────────────────────── OK
 labels = [
     "Applicator white/blue",   # 0
     "Applicator white/gray",   # 1
@@ -69,19 +71,14 @@ labels = [
     "Inhaler blue",            # 5
     "Inhaler white",           # 6
     "Canister"                 # 7
+    # Sharps: label index TBD — future YOLO model
 ]
 
-bbox_colors = [
-    (173, 216, 230), (211, 211, 211), (105, 105, 105),
-    (255, 165,   0), (255, 192, 203), (  0,   0, 128),
-    (255, 255, 255), (255,   0,   0)
-]
+bbox_colors = [(173, 216, 230),(211, 211, 211),(105, 105, 105),(255, 165,   0), (255, 192, 203), (  0,   0, 128),(255, 255, 255), (255,   0,   0)]
 
-# ── 4 servo categories ────────────────────────────────────────────────────────
-# canister  → Servo 1 – Canister
-# sharps    → Servo 2 – Apply Pen / Syringes / Bag
-# applicator→ Servo 3 – Applicator
-# inhaler   → Servo 4 – Inhaler
+# ── Canonical category mapping ────────────────────────────────────────────────
+
+# YOLO label index → Category
 LABEL_TO_CATEGORY = {
     0: "applicator",
     1: "applicator",
@@ -90,26 +87,35 @@ LABEL_TO_CATEGORY = {
     4: "applicator",
     5: "inhaler",
     6: "inhaler",
-    7: "canister",       # was "unrecognized" — now a real servo category
+    7: "canister",
+    # sharps: no label index yet — add here when new YOLO model is ready
 }
 
+# Arduino servo index → Category
+SERVO_INDEX_TO_CATEGORY = {
+    1: "canister",
+    2: "sharps",
+    3: "applicator",
+    4: "inhaler",
+}
+# Category → Servo Label
 SERVO_LABEL = {
     "canister":   "Servo 1 – Canister",
-    "sharps":     "Servo 2 – Apply Pen / Syringes / Bag",
+    "sharps":     "Servo 2 – Sharps / Apply Pen / Syringes / Bag",
     "applicator": "Servo 3 – Applicator",
     "inhaler":    "Servo 4 – Inhaler",
 }
-
-SERVO_COLOR = {                         # BGR, for the cv2 overlay
-    "canister":   (  0, 200, 255),      # amber
-    "sharps":     (  0,  80, 255),      # red-orange
-    "applicator": (200, 255,  80),      # lime
-    "inhaler":    ( 80, 255, 200),      # teal
+# Category → Servo color ( RGB )
+SERVO_COLOR = {
+    "canister":   (  0, 200, 255), #
+    "sharps":     (  0,  80, 255),
+    "applicator": (200, 255,  80),
+    "inhaler":    ( 80, 255, 200),
 }
 
 num_classes = len(labels)
 
-# ── Load NCNN model ───────────────────────────────────────────────────────────
+# ── Load NCNN model ─────────────────────────────────────────────────────────── OK
 net = ncnn.Net()
 net.opt.use_vulkan_compute  = False
 net.opt.num_threads         = 4
@@ -124,7 +130,7 @@ if net.load_model(bin_file) != 0:
     raise RuntimeError(f"Failed to load model: {bin_file}")
 print("Model loaded OK")
 
-# ── Camera ────────────────────────────────────────────────────────────────────
+# ── Camera ──────────────────────────────────────────────────────────────────── OK
 picam = Picamera2()
 picam.configure(picam.create_video_configuration(
     main={"size": (input_size, input_size), "format": "RGB888"}
@@ -132,7 +138,7 @@ picam.configure(picam.create_video_configuration(
 picam.start()
 print("Camera OK")
 
-# ── Serial (Pi ↔ Arduino) ─────────────────────────────────────────────────────
+# ── Serial (Pi ↔ Arduino) ───────────────────────────────────────────────────── OK
 try:
     ser = serial.Serial(args.serial_port, args.baud, timeout=0.05)
     print(f"Serial OK on {args.serial_port} @ {args.baud}")
@@ -145,14 +151,30 @@ def serial_send(msg: str):
         ser.write((msg + "\n").encode())
         print(f"[SERIAL →] {msg}")
 
-# ── SocketIO client ───────────────────────────────────────────────────────────
+# ── Conveyor motor state ────────────────────────────────────────────────────── OK
+motor_running = False
+motor_lock    = threading.Lock()
+
+# ── SocketIO client ─────────────────────────────────────────────────────────── OK
 sio = socketio.Client(reconnection=True, reconnection_attempts=0)
+
+# ── Emit initial state when SocketIO connects ───────────────────────────────── OK
+@sio.on("connect")
+def on_sio_connect():
+    print("[SIO] connected — emitting initial conveyor state")
+    with motor_lock:
+        running = motor_running
+    _async_emit("conveyor_state", {
+        "id":      "conveyor_1",
+        "running": running,
+    })
 
 def connect_socketio():
     while True:
         try:
-            sio.connect(args.server_url, transports=["polling"])
-            print(f"SocketIO connected to {args.server_url} (polling)")
+            sio.connect(args.server_url) # no use of transports=["polling"]
+            print(f"SocketIO connected to {args.server_url} ({sio.transport()})")
+            sio.emit("test_latency", {"t": time.time()}) # latency test send 
             break
         except Exception as e:
             print(f"SocketIO connect failed ({e}), retrying…")
@@ -160,19 +182,44 @@ def connect_socketio():
 
 threading.Thread(target=connect_socketio, daemon=True).start()
 
-# ── Shared frame buffers (for WebSocket encoder) ──────────────────────────────
+# ── SocketIO latency test response handler ─────────────────────────────────── OK
+
+@sio.on("latency_reply")
+def on_latency_reply(data):
+    dt = time.time() - data["t"]
+    print(f"Latency: {dt*1000:.1f} ms")
+
+# ── Conveyor control from dashboard ────────────────────────────────────────── OK
+
+@sio.on("update_conveyor")
+def on_conveyor_update(data):
+    global motor_running
+    requested = bool(data.get("running", False))
+
+    with motor_lock:
+        if requested == motor_running:
+            return
+        motor_running = requested 
+
+    cmd = "MOTOR:FORWARD" if requested else "MOTOR:STOP"
+    serial_send(cmd)
+
+    print(f"[DASHBOARD → YOLO] Request: {'RUNNING' if requested else 'STOP'}")
+
+# ── Shared frame buffers (for WebSocket encoder) ────────────────────────────── OK
+
 latest_frame = None
 frame_lock   = threading.Lock()
 encoded_buf  = None
 encoded_lock = threading.Lock()
 encode_event = threading.Event()
 
-# ── Active servo state (set after commit, cleared when next buffer starts) ────
-active_servo      = None          # current category string or None
-active_servo_lock = threading.Lock()
-active_servo_until = 0.0          # timestamp after which overlay fades
+# ── Active servo state ──────────────────────────────────────────────────────── OK
+active_servo       = None
+active_servo_lock  = threading.Lock()
+active_servo_until = 0.0
 
-# ── Adaptive majority-vote buffer ─────────────────────────────────────────────
+# ── Adaptive majority-vote buffer ───────────────────────────────────────────── OK
 MIN_FRAMES = args.min_frames
 GAP_LIMIT  = args.gap_limit
 
@@ -291,23 +338,19 @@ def commit_buffer():
 
     category   = result["winner"]
     confidence = result["confidence"]
-    # Use the category name as display — avoids showing the first matching
-    # sub-label (e.g. "Applicator white/blue") when the real object could
-    # be any variant within that category.
     display    = category.capitalize()
 
-    # ── Activate the matching servo ───────────────────────────────────────────
+    # Overlay shown until Arduino confirms close (or 10s safety cap)
     with active_servo_lock:
-        active_servo       = category
-        # Match server-side deactivation delays
-        _OVERLAY_DELAY = {"canister": 3.0, "sharps": 3.0, "applicator": 7.0, "inhaler": 7.0}
-        active_servo_until = time.time() + _OVERLAY_DELAY.get(category, 3.0)
+        active_servo = category
+        active_servo_until = time.time() + 10.0   # safety cap; cleared on CLOSED feedback
 
     serial_send(f"LABEL:{category}")
 
-    # Emit servo activation to Flask dashboard
-    _async_emit("servo_update", {"type": category, "active": True})
-
+    _async_emit("servo_update", {
+        "type": category, 
+        "active": True
+        })
     _async_emit("yolo_detection", {
         "label":        category,
         "confidence":   confidence,
@@ -328,32 +371,186 @@ def commit_buffer():
         "leader":       category,
     })
 
-# ── Serial reader ─────────────────────────────────────────────────────────────
+# ── STATUS line parser ────────────────────────────────────────────────────────
+def _handle_status_line(line: str):
+    """
+    Parse STATUS:MOTOR:FORWARD|SENSOR1:CLEAR|... and emit a snapshot
+    so the dashboard can sync state after any Arduino change.
+    """
+    content = line[7:]          # strip "STATUS:"
+    snapshot = {}
+    for token in content.split("|"):
+        kv = token.split(":", 1)
+        if len(kv) == 2:
+            snapshot[kv[0]] = kv[1]
+    _async_emit("status_snapshot", snapshot)
+
+# ── Serial reader — handles EVERY Arduino message type ───────────────────────
 def serial_reader():
     while True:
         if not ser or not ser.is_open:
             time.sleep(0.1)
             continue
         try:
-            line = ser.readline().decode(errors="ignore").strip()
+            raw  = ser.readline().decode(errors="ignore").strip()
+            line = raw
             if not line:
                 continue
+
             print(f"[SERIAL ←] {line}")
+
+            # ── Separator lines ───────────────────────────────────────────────
+            if line.startswith("---"):
+                continue
+
+            # ── STATUS snapshot ───────────────────────────────────────────────
+            if line.startswith("STATUS:"):
+                _handle_status_line(line)
+                continue
+
+            # ── CHANGE annotation (log only) ──────────────────────────────────
+            if line.startswith("CHANGE:"):
+                _async_emit("change_event", {"change": line[7:]})
+                continue
+
             parts = line.split(":")
+
+            # ── Sensor events → buffer + dashboard ───────────────────────────
             if len(parts) == 3 and parts[0] == "SENSOR":
                 sensor_id = parts[1]
                 event     = parts[2]
+
+                # ── RESET: commit previous, start fresh ──────────────────
+                if sensor_id == "RESET" and event == "TRIGGERED":
+                    with buf_lock:
+                        has_enough     = len(buf.votes) >= MIN_FRAMES
+                        was_collecting = buf.collecting
+                        buf.collecting = False
+
+                    if was_collecting and has_enough:
+                        print(f"[BUFFER] reset → committing {len(buf.votes)} frames")
+                        _trigger_commit()
+                    else:
+                        print(f"[BUFFER] reset → skipping ({len(buf.votes)}/{MIN_FRAMES} frames)")
+
+                    with buf_lock:
+                        buf.reset()
+                    continue
+                
+                # ── POS_SENSOR 1 & 2: dashboard only ─────────────────────
                 _async_emit("sensor_update", {
                     "id":          f"sensor_{sensor_id}",
                     "triggered":   event == "TRIGGERED",
-                    "distance_cm": None
+                    "distance_cm": None,
                 })
-                with buf_lock:
-                    if event == "TRIGGERED":
-                        buf.reset()
-                    elif event == "CLEAR" and buf.collecting:
-                        buf.collecting = False
-                        _trigger_commit()
+                continue
+
+            # ── Motor ACK → update conveyor state on dashboard ────────────────
+            if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "MOTOR":
+                running = parts[2] == "FORWARD"
+
+                with motor_lock:
+                    global motor_running
+                    motor_running = running   # ✅ THIS WAS MISSING
+
+                print(f"[ARDUINO → YOLO] Motor state = {'RUNNING' if running else 'STOP'}")
+
+                _async_emit("conveyor_state", {
+                    "id":      "conveyor_1",
+                    "running": running,
+                })
+                continue
+
+            # ── Label ACK ────────────────────────────────────────────────────
+            if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "LABEL":
+                category = parts[2].lower()
+                _async_emit("ack_label", {"category": category})
+                continue
+
+            # ── Servo events ──────────────────────────────────────────────────
+            if len(parts) >= 3 and parts[0] == "SERVO":
+                try:
+                    servo_idx = int(parts[1])
+                    event     = parts[2]
+                except (ValueError, IndexError):
+                    _async_emit("arduino_error", {
+                        "error": f"SERVO parse error: {line}",
+                        "raw":   line,
+                    })
+                    continue
+
+                category = SERVO_INDEX_TO_CATEGORY.get(servo_idx)
+                if category is None:
+                    _async_emit("arduino_error", {
+                        "error": f"Unknown servo index {servo_idx}",
+                        "raw":   line,
+                    })
+                    continue
+
+                if event == "OPEN":
+                    # Arduino confirmed open — dashboard already notified by
+                    # servo_update(active=True) sent from commit_buffer.
+                    # Nothing extra needed; OBJECT_DETECTED is informational.
+                    pass
+
+                elif event == "OBJECT_DETECTED":
+                    # Informational only — relay for dashboard log
+                    _async_emit("servo_object_detected", {
+                        "type":  category,
+                        "index": servo_idx,
+                    })
+
+                elif event in ("CLOSED_OK", "CLOSED_TIMEOUT"):
+                    # ─── PRIMARY servo deactivation path ───────────────────
+                    # Driven entirely by Arduino feedback, no timers.
+                    with active_servo_lock:
+                        global active_servo, active_servo_until
+                        if active_servo == category:
+                            active_servo       = None
+                            active_servo_until = 0.0
+                    _async_emit("servo_closed", {
+                        "type":   category,
+                        "index":  servo_idx,
+                        "status": event.lower(),   # "closed_ok" or "closed_timeout"
+                    })
+
+                elif event == "BLOCKED":
+                    _async_emit("servo_error", {
+                        "type":  category,
+                        "index": servo_idx,
+                        "error": "blocked_at_start",
+                    })
+
+                continue
+
+            # ── ERR messages → relay to dashboard ────────────────────────────
+            if parts[0] == "ERR":
+                detail = ":".join(parts[1:])
+                _async_emit("arduino_error", {
+                    "error": detail,
+                    "raw":   line,
+                })
+                continue
+
+            # ── INFO messages (e.g. INFO:UNRECOGNIZED) ────────────────────────
+            if parts[0] == "INFO":
+                detail = ":".join(parts[1:])
+                _async_emit("arduino_info", {
+                    "info": detail,
+                    "raw":  line,
+                })
+                continue
+
+            # ── Boot/ready banner — ignore ────────────────────────────────────
+            if "Sorting System Ready" in line:
+                continue
+
+            # ── Anything unrecognised — log as warning ────────────────────────
+            _async_emit("arduino_error", {
+                "error": f"Unrecognised serial line: {line}",
+                "raw":   line,
+            })
+
         except Exception as e:
             print(f"[SERIAL] read error: {e}")
             time.sleep(0.05)
@@ -387,6 +584,7 @@ def nms(boxes, scores, threshold):
 
 # ── Encoder thread (WebSocket) ────────────────────────────────────────────────
 encoder_running = True
+
 def encoder_thread_fn():
     global encoded_buf
     while encoder_running:
@@ -422,9 +620,8 @@ async def run_ws_server():
 
 threading.Thread(target=lambda: asyncio.run(run_ws_server()), daemon=True).start()
 
-# ── Helpers: simulate sensor via keyboard ────────────────────────────────────
+# ── Keyboard sensor simulation ────────────────────────────────────────────────
 def kb_sensor_triggered():
-    """Simulate SENSOR:1:TRIGGERED from keyboard (SPACE key)."""
     print("[KB SIM] SENSOR TRIGGERED")
     _async_emit("sensor_update", {
         "id": "sensor_1", "triggered": True, "distance_cm": None
@@ -433,7 +630,6 @@ def kb_sensor_triggered():
         buf.reset()
 
 def kb_sensor_clear():
-    """Simulate SENSOR:1:CLEAR from keyboard (C key)."""
     print("[KB SIM] SENSOR CLEAR")
     _async_emit("sensor_update", {
         "id": "sensor_1", "triggered": False, "distance_cm": None
@@ -445,7 +641,6 @@ def kb_sensor_clear():
 
 # ── Servo overlay helper ──────────────────────────────────────────────────────
 def draw_servo_overlay(frame):
-    """Draw a coloured banner at the bottom showing the last active servo."""
     with active_servo_lock:
         cat   = active_servo
         until = active_servo_until
@@ -457,11 +652,9 @@ def draw_servo_overlay(frame):
     label = SERVO_LABEL.get(cat, cat.capitalize())
     h, w  = frame.shape[:2]
 
-    # Semi-transparent banner
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, h - 50), (w, h), color, -1)
     cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-
     cv2.putText(frame, f"ACTIVE: {label}",
                 (12, h - 16),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
@@ -575,7 +768,7 @@ try:
         # ── Active servo banner ───────────────────────────────────────────────
         draw_servo_overlay(frame)
 
-        # ── FPS (true frame-to-frame) ─────────────────────────────────────────
+        # ── FPS ───────────────────────────────────────────────────────────────
         now = time.time()
         if prev_t is not None:
             fps_buffer.append(1.0 / max(now - prev_t, 1e-6))
@@ -596,9 +789,9 @@ try:
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
-        elif key == ord(' '):      # SPACE → sensor triggered
+        elif key == ord(' '):
             kb_sensor_triggered()
-        elif key == ord('c'):      # C     → sensor clear / commit
+        elif key == ord('c'):
             kb_sensor_clear()
 
 except KeyboardInterrupt:

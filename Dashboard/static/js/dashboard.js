@@ -150,8 +150,6 @@ function setServoState(type, active) {
     item.classList.add(`active-${type}`);
 
     // Client-side safety reset after 4 s (server sends deactivate at 3 s)
-    clearTimeout(_servoTimers[type]);
-    _servoTimers[type] = setTimeout(() => setServoState(type, false), 4000);
   } else {
     clearTimeout(_servoTimers[type]);
     wrap.className  = 'servo-icon-wrap inactive';
@@ -342,6 +340,12 @@ socket.on('update_conveyor',    (data) => {
     `speed=${data.speed} m/s`);
 });
 socket.on('update_servo',       (data) => setServoState(data.type, data.active));
+socket.on('servo_closed', (data) => {
+  setServoState(data.type, false);
+  if (debugEnabled) appendLogRow(new Date().toISOString(), 'servo',
+    `Servo ${data.type} deactivated`,
+    data.status || '');
+});
 socket.on('new_alert',          (data) => setWarning(data.message));
 socket.on('unrecognized_alert', (data) => {
   showUnrecognized(`Unrecognized object detected${data.display ? ': ' + data.display : ''} (total: ${data.total})`);
