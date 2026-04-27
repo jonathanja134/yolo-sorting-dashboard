@@ -1,12 +1,17 @@
-#include <Servo.h>
+#include <EEPROM.h>
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
 
-// ── CONFIG ──────────────────────────────────────────────────
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(); // default I2C addr 0x40
+
+// ── CONFIG ───────────────────────────────────────────────────
 #define NB_SERVOS 4
 
-#define S_MOTOR_1  13
-#define S_MOTOR_2  12
-#define S_MOTOR_3   8
-#define S_MOTOR_4   7
+// PCA9685 channel numbers (0–15)
+#define S_MOTOR_1  12
+#define S_MOTOR_2  13
+#define S_MOTOR_3  14
+#define S_MOTOR_4  15
 
 #define MotorFw 10
 #define MotorDw  9
@@ -15,54 +20,97 @@
 #define POS_SENSOR_2  2
 #define RESET_SENSOR  5
 
-#define PULLDOWN_1   3   // jumper → pin 4
-#define PULLDOWN_2   6   // jumper → pin 2
-#define PULLDOWN_R  11   // jumper → pin 5
+#define PULLDOWN_1   3
+#define PULLDOWN_2   6
+#define PULLDOWN_R  11
 
-const int OPEN_POS  = 90;
-const int CLOSE_POS =  0;
-const unsigned long SERVO_OPEN_MS  = 400;
-const unsigned long SENSOR_TIMEOUT = 8000;
-const unsigned long DEBOUNCE_MS    = 50;
+// PCA9685 @ 50 Hz → 4096 ticks per 20 ms period
+// Standard servo: 1000 µs (0°) … 2000 µs (180°)
+// Adjust SERVO_MIN / SERVO_MAX to match your servos if needed
+#define SERVO_MIN  125   // ~1000 µs  (≈ 0°)
+#define SERVO_MAX  625   // ~2000 µs  (≈ 180°)
 
-const int SERVO_PINS[NB_SERVOS] = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
+const int            OPEN_OFFSET    = 47;
+const unsigned long  SERVO_OPEN_MS  = 400;
+const unsigned long  SENSOR_TIMEOUT = 8000;
+const unsigned long  DEBOUNCE_MS    = 50;
+
+const int EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
+const int SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
 const char* CATEGORY_NAMES[NB_SERVOS] = { "canister", "sharps", "applicator", "inhaler" };
 
-Servo servos[NB_SERVOS];
-bool servoOpen[NB_SERVOS] = { false, false, false, false };
+int  servoPos[NB_SERVOS];
+int  homePos[NB_SERVOS];
+bool servoOpen[NB_SERVOS] = {};
 bool motorRunning = false;
+bool inActuation  = false;
 
-// ── SENSOR STATES ────────────────────────────────────────────
-bool s1Last    = LOW;
-bool s2Last    = LOW;
-bool resetLast = LOW;
+// ── PNP NO SENSOR STATE ──────────────────────────────────────
+struct Sensor {
+  int           id;
+  int           pin;
+  bool          raw;
+  bool          state;
+  bool          triggered;
+  unsigned long lastEdge;
+};
 
-unsigned long s1LastChange    = 0;
-unsigned long s2LastChange    = 0;
-unsigned long resetLastChange = 0;
+Sensor sensors[2] = {
+  { 1, POS_SENSOR_1, LOW, LOW, false, 0 },
+  { 2, POS_SENSOR_2, LOW, LOW, false, 0 }
+};
+
+// ── HELPERS ──────────────────────────────────────────────────
+// Convert 0–180° angle to PCA9685 tick count
+uint16_t angleToPulse(int angle) {
+  angle = constrain(angle, 0, 180);
+  return map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
+}
+
+// ── MOVE SERVO via PCA9685 ───────────────────────────────────
+void moveServo(int idx, int angle) {
+  angle = constrain(angle, 0, 180);
+  pwm.setPWM(SERVO_CHANNELS[idx], 0, angleToPulse(angle));
+  servoPos[idx] = angle;
+}
 
 // ── SETUP ────────────────────────────────────────────────────
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
-  // Pulldowns
+  // PCA9685 init
+  pwm.begin();
+  pwm.setPWMFreq(50);   // 50 Hz standard for servos
+  delay(10);            // let oscillator stabilise
+
   pinMode(PULLDOWN_1, OUTPUT); digitalWrite(PULLDOWN_1, LOW);
   pinMode(PULLDOWN_2, OUTPUT); digitalWrite(PULLDOWN_2, LOW);
   pinMode(PULLDOWN_R, OUTPUT); digitalWrite(PULLDOWN_R, LOW);
 
-  // Sensors
   pinMode(POS_SENSOR_1, INPUT);
   pinMode(POS_SENSOR_2, INPUT);
   pinMode(RESET_SENSOR, INPUT);
 
-  // Motor
   pinMode(MotorFw, OUTPUT); digitalWrite(MotorFw, LOW);
   pinMode(MotorDw, OUTPUT); digitalWrite(MotorDw, LOW);
 
-  // Servos
   for (int i = 0; i < NB_SERVOS; i++) {
-    servos[i].attach(SERVO_PINS[i]);
-    servos[i].write(CLOSE_POS);
+    byte stored  = EEPROM.read(EEPROM_ADDR[i]);
+    bool hasHome = (stored <= 180);
+
+    if (hasHome) {
+      homePos[i]  = (int)stored;
+      servoPos[i] = homePos[i];
+      moveServo(i, homePos[i]);   // drive PCA9685 channel to stored position
+      Serial.print("SERVO:"); Serial.print(i + 1);
+      Serial.print(":RESTORED:"); Serial.println(homePos[i]);
+    } else {
+      homePos[i]  = 90;
+      servoPos[i] = 90;
+      // NOT written to driver — servo stays physically where it is
+      Serial.print("SERVO:"); Serial.print(i + 1);
+      Serial.println(":NO_HOME — position manually then send HOME:SAVE");
+    }
   }
 
   Serial.println("=== Sorting System Ready ===");
@@ -74,62 +122,41 @@ void loop() {
   readSerial();
 }
 
-// ── SENSORS ──────────────────────────────────────────────────
+// ── SENSOR UPDATE ────────────────────────────────────────────
+void updateSensor(Sensor &s, int servoStart, int servoEnd) {
+  unsigned long now     = millis();
+  bool          reading = digitalRead(s.pin);
+
+  if (reading == s.raw) return;
+  if ((now - s.lastEdge) < DEBOUNCE_MS) return;
+
+  s.raw      = reading;
+  s.lastEdge = now;
+
+  if (reading == HIGH && s.state == LOW) {
+    s.state     = HIGH;
+    s.triggered = true;
+    Serial.print("SENSOR:"); Serial.print(s.id); Serial.println(":TRIGGERED");
+
+  } else if (reading == LOW && s.state == HIGH) {
+    s.state     = LOW;
+    s.triggered = false;
+
+    if (!inActuation) {
+      for (int i = servoStart; i < servoEnd; i++) {
+        if (servoOpen[i]) {
+          moveServo(i, homePos[i]);
+          servoOpen[i] = false;
+          Serial.print("SERVO:"); Serial.print(i + 1); Serial.println(":FORCED_CLOSE");
+        }
+      }
+    }
+  }
+}
+
 void readSensors() {
-  unsigned long now = millis();
-
-  bool s1    = digitalRead(POS_SENSOR_1);
-  bool s2    = digitalRead(POS_SENSOR_2);
-  bool reset = digitalRead(RESET_SENSOR);
-
-  // ── POS_SENSOR_1 ─────────────────────────────────────────
-  if (s1 != s1Last && (now - s1LastChange) > DEBOUNCE_MS) {
-    s1Last        = s1;
-    s1LastChange  = now;
-
-    if (s1 == HIGH) {
-      Serial.println("SENSOR:1:TRIGGERED");
-      for (int i = 0; i < 2; i++) {
-        if (servoOpen[i]) {
-          servos[i].write(CLOSE_POS);
-          servoOpen[i] = false;
-          Serial.print("SERVO:"); Serial.print(i + 1); Serial.println(":FORCED_CLOSE");
-        }
-      }
-    } else {
-      Serial.println("SENSOR:1:CLEAR");
-    }
-  }
-
-  // ── POS_SENSOR_2 ─────────────────────────────────────────
-  if (s2 != s2Last && (now - s2LastChange) > DEBOUNCE_MS) {
-    s2Last       = s2;
-    s2LastChange = now;
-
-    if (s2 == HIGH) {
-      Serial.println("SENSOR:2:TRIGGERED");
-      for (int i = 2; i < 4; i++) {
-        if (servoOpen[i]) {
-          servos[i].write(CLOSE_POS);
-          servoOpen[i] = false;
-          Serial.print("SERVO:"); Serial.print(i + 1); Serial.println(":FORCED_CLOSE");
-        }
-      }
-    } else {
-      Serial.println("SENSOR:2:CLEAR");
-    }
-  }
-
-  // ── RESET SENSOR ─────────────────────────────────────────
-  if (reset != resetLast && (now - resetLastChange) > DEBOUNCE_MS) {
-    resetLast       = reset;
-    resetLastChange = now;
-
-    if (reset == HIGH) {
-      Serial.println("SENSOR:RESET:TRIGGERED");
-    }
-    // no CLEAR sent — Python doesn't need it
-  }
+  updateSensor(sensors[0], 0, 2);
+  updateSensor(sensors[1], 2, 4);
 }
 
 // ── SERIAL ───────────────────────────────────────────────────
@@ -139,14 +166,26 @@ void readSerial() {
   String cmd = Serial.readStringUntil('\n');
   cmd.trim();
 
+  if (cmd == "HOME:SAVE") {
+    for (int i = 0; i < NB_SERVOS; i++) {
+      homePos[i] = servoPos[i];   // capture current position as home
+      EEPROM.write(EEPROM_ADDR[i], (byte)homePos[i]);
+      Serial.print("HOME:SAVED:SERVO:"); Serial.print(i + 1);
+      Serial.print(":"); Serial.println(homePos[i]);
+    }
+    return;
+  }
+
   if (cmd.startsWith("MOTOR:")) {
     String action = cmd.substring(6);
     if (action == "FORWARD") {
-      digitalWrite(MotorFw, HIGH); digitalWrite(MotorDw, LOW);
+      digitalWrite(MotorFw, HIGH);
+      digitalWrite(MotorDw, LOW);
       motorRunning = true;
       Serial.println("ACK:MOTOR:FORWARD");
     } else if (action == "STOP") {
-      digitalWrite(MotorFw, LOW); digitalWrite(MotorDw, LOW);
+      digitalWrite(MotorFw, LOW);
+      digitalWrite(MotorDw, LOW);
       motorRunning = false;
       Serial.println("ACK:MOTOR:STOP");
     } else {
@@ -163,11 +202,6 @@ void readSerial() {
   String category = cmd.substring(6);
   category.toLowerCase();
 
-  if (category == "unrecognized") {
-    Serial.println("INFO:UNRECOGNIZED");
-    return;
-  }
-
   int idx = -1;
   for (int i = 0; i < NB_SERVOS; i++) {
     if (category == CATEGORY_NAMES[i]) { idx = i; break; }
@@ -182,30 +216,44 @@ void readSerial() {
   actuateServo(idx);
 }
 
-// ── SERVO ────────────────────────────────────────────────────
+// ── SERVO ACTION ─────────────────────────────────────────────
 void actuateServo(int idx) {
-  servos[idx].write(OPEN_POS);
+  inActuation = true;
+
+  Sensor &s = sensors[(idx < 2) ? 0 : 1];
+  s.triggered = false;
+
+  int openPos = constrain(homePos[idx] + OPEN_OFFSET, 0, 180);
+  if (openPos == homePos[idx]) {
+    Serial.print("WARN:SERVO:"); Serial.print(idx + 1);
+    Serial.println(":OPEN_CLAMPED — homePos too high for OPEN_OFFSET");
+  }
+
+  moveServo(idx, openPos);
   servoOpen[idx] = true;
   Serial.print("SERVO:"); Serial.print(idx + 1); Serial.println(":OPEN");
 
   delay(SERVO_OPEN_MS);
+  s.triggered = false;
 
   unsigned long start    = millis();
   bool          detected = false;
-  int           sensorPin = (idx < 2) ? POS_SENSOR_1 : POS_SENSOR_2;
 
   while (millis() - start < SENSOR_TIMEOUT) {
-    readSensors();   // ← keeps lastState in sync while blocked
-    if (digitalRead(sensorPin) == HIGH) {
-      detected = true;
+    readSensors();
+
+    if (s.triggered) {
+      detected    = true;
+      s.triggered = false;
       Serial.print("SERVO:"); Serial.print(idx + 1); Serial.println(":OBJECT_DETECTED");
       break;
     }
-    delay(10);
   }
 
-  servos[idx].write(CLOSE_POS);
+  moveServo(idx, homePos[idx]);
   servoOpen[idx] = false;
+  inActuation    = false;
+
   Serial.print("SERVO:"); Serial.print(idx + 1);
   Serial.println(detected ? ":CLOSED_OK" : ":CLOSED_TIMEOUT");
 }
