@@ -21,7 +21,7 @@
   /* ── 4 category colours ── */
   --c-applicator: #3b82f6;   /* blue   */
   --c-inhaler:    #a855f7;   /* purple */
-  --c-sharps:     #f97316;   /* orange */
+  --c-chemical:   #0ea5e9;   /* sky blue */
   --c-canister:   #f59e0b;   /* amber  */
 }
 
@@ -173,7 +173,8 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .warning-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .warning-icon   { width: 20px; height: 20px; }
 .warning-title  { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #92400e; }
-.warning-message{ font-size: 0.82rem; color: #78350f; line-height: 1.5; }
+.warning-message{ font-size: 0.82rem; color: #78350f; line-height: 1.5; white-space: pre-line; }
+.warning-message.warning-error{ color: #b91c1c; }
 
 /* ── CONVEYOR ── */
 .conveyor-card  { display: flex; flex-direction: column; }
@@ -202,6 +203,9 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .conveyor-action-btn.stop-btn:hover  { background: var(--red-bg); }
 .conveyor-action-btn.start-btn { border-color: var(--green); color: var(--green); background: transparent; }
 .conveyor-action-btn.start-btn:hover { background: var(--green-bg); }
+.conveyor-action-btn.disabled-btn { border-color: #9ca3af; color: #6b7280; background: var(--border); cursor: not-allowed; }
+.conveyor-action-btn.disabled-btn:hover { background: var(--border); }
+.conveyor-status-btn.disconnected { background: #e5e7eb; box-shadow: 0 0 0 3px rgba(107,114,128,0.15); }
 
 /* ── SORTING RATE ── */
 .rate-card { text-align: center; padding: 1.25rem; }
@@ -228,10 +232,10 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 /* Active servo row highlight — one class per category */
 .servo-item.active-applicator { border-color: var(--c-applicator); background: #eff6ff; }
 .servo-item.active-inhaler    { border-color: var(--c-inhaler);    background: #faf5ff; }
-.servo-item.active-sharps     { border-color: var(--c-sharps);     background: #fff7ed; }
+.servo-item.active-chemical   { border-color: var(--c-chemical);   background: #e0f2fe; }
 .servo-item.active-canister   { border-color: var(--c-canister);   background: #fffbeb; }
 
-/* Sharps — greyed out / pending label */
+/* Pending servo state */
 .servo-item.pending {
   opacity: 0.55;
 }
@@ -263,7 +267,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .count-bar-track { height: 4px; background: var(--border); border-radius: 2px; margin-top: 1rem; overflow: hidden; }
 .count-bar-fill  { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
 
-/* Sharps count card — pending */
+/* Chemical count card — pending */
 .count-card.pending {
   opacity: 0.5;
   pointer-events: none;
@@ -492,3 +496,46 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   color: var(--text-secondary);
   font-size: 0.66rem;
 }
+/* ── Log filter bar ─────────────────────────────── */
+    .log-filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 8px;
+    }
+    .log-filter-btn {
+      font-size: 0.62rem;
+      font-family: 'DM Mono', monospace;
+      padding: 3px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--border, #2e3650);
+      background: transparent;
+      color: var(--text-secondary, #9aa3b8);
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      transition: background 0.15s, color 0.15s;
+    }
+    .log-filter-btn:hover {
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+    }
+    .log-filter-btn.active {
+      color: #fff;
+      border-color: transparent;
+    }
+    .log-filter-btn[data-filter="all"].active    { background: #374151; }
+    .log-filter-btn[data-filter="detection"].active { background: #16a34a; }
+    .log-filter-btn[data-filter="servo"].active  { background: #2563eb; }
+    .log-filter-btn[data-filter="sensor"].active { background: #9333ea; }
+    .log-filter-btn[data-filter="conveyor"].active { background: #0891b2; }
+    .log-filter-btn[data-filter="error"].active  { background: #dc2626; }
+
+    /* ── Log row category colours ──────────────────── */
+    .log-row-detection td:nth-child(2) { color: #4ade80; }
+    .log-row-servo      td:nth-child(2) { color: #60a5fa; }
+    .log-row-sensor     td:nth-child(2) { color: #c084fc; }
+    .log-row-conveyor   td:nth-child(2) { color: #22d3ee; }
+    .log-row-error      td:nth-child(2) { color: #f87171; font-weight: 600; }
+
+    .log-row-hidden { display: none; }

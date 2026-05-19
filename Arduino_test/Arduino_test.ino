@@ -8,44 +8,54 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(); // default I2C addr 0x4
 #define NB_SERVOS 4
 
 // PCA9685 channel numbers (0–15)
-#define S_MOTOR_1  12
-#define S_MOTOR_2  13
-#define S_MOTOR_3  14
-#define S_MOTOR_4  15
+// 1: "canister"
+// 2: "chemical"
+// 3: "applicator"
+// 4: "inhaler"
+
+
+#define S_MOTOR_1  12   // LEFT group
+#define S_MOTOR_2  13   // LEFT group
+#define S_MOTOR_3  14   // RIGHT group (sensor side)
+#define S_MOTOR_4  15   // RIGHT group (sensor side
 
 #define MotorFw 10
+
 #define MotorDw  9
 
 #define POS_SENSOR_1  4
 #define POS_SENSOR_2  2
 #define RESET_SENSOR  5
 
-#define PULLDOWN_1   3
+#define PULLDOWN_1   7
 #define PULLDOWN_2   6
 #define PULLDOWN_R  11
 
 // PCA9685 @ 50 Hz → 4096 ticks per 20 ms period
-// Standard servo: 1000 µs (0°) … 2000 µs (180°)
-// Adjust SERVO_MIN / SERVO_MAX to match your servos if needed
-#define SERVO_MIN  125   // ~1000 µs  (≈ 0°)
-#define SERVO_MAX  625   // ~2000 µs  (≈ 180°)
+#define SERVO_MIN 150    // ~1000 µs  (≈ 0°)
+#define SERVO_MAX 600    // ~2000 µs  (≈ 180°)
 
-const int            OPEN_OFFSET    = 47;
-const unsigned long  SERVO_OPEN_MS  = 400;
-const unsigned long  SENSOR_TIMEOUT = 8000;
+// ── SERVO POSITIONS ──────────────────────────────────────────
+#define CLOSED_POS      120   // all servos close to this position
+#define OPEN_POS_LEFT    80   // channels 12, 13 (idx 0, 1) open position
+#define OPEN_POS_RIGHT  160   // channels 14, 15 (idx 2, 3) open position
+
+const unsigned long  SERVO_OPEN_MS  = 500;
+const unsigned long  SENSOR_TIMEOUT = 400;
 const unsigned long  DEBOUNCE_MS    = 50;
 
 const int EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
 const int SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
-const char* CATEGORY_NAMES[NB_SERVOS] = { "canister", "sharps", "applicator", "inhaler" };
+const char* CATEGORY_NAMES[NB_SERVOS] = { "canister", "chemical", "applicator", "inhaler" };
 
+const int MotorOnLED = 3;
 int  servoPos[NB_SERVOS];
 int  homePos[NB_SERVOS];
 bool servoOpen[NB_SERVOS] = {};
 bool motorRunning = false;
 bool inActuation  = false;
 
-// ── PNP NO SENSOR STATE ──────────────────────────────────────
+// ── SENSOR STATE ─────────────────────────────────────────────
 struct Sensor {
   int           id;
   int           pin;
@@ -61,10 +71,15 @@ Sensor sensors[2] = {
 };
 
 // ── HELPERS ──────────────────────────────────────────────────
-// Convert 0–180° angle to PCA9685 tick count
 uint16_t angleToPulse(int angle) {
   angle = constrain(angle, 0, 180);
+  angle = 180 - angle;   // invert servo direction
   return map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
+}
+
+// Returns the correct open position for a given servo index
+int getOpenPos(int idx) {
+  return (idx < 2) ? OPEN_POS_LEFT : OPEN_POS_RIGHT;
 }
 
 // ── MOVE SERVO via PCA9685 ───────────────────────────────────
@@ -78,10 +93,10 @@ void moveServo(int idx, int angle) {
 void setup() {
   Serial.begin(115200);
 
-  // PCA9685 init
   pwm.begin();
-  pwm.setPWMFreq(50);   // 50 Hz standard for servos
-  delay(10);            // let oscillator stabilise
+  pwm.setPWMFreq(50);
+  delay(10);
+  Serial.println("PCA9685 OK");
 
   pinMode(PULLDOWN_1, OUTPUT); digitalWrite(PULLDOWN_1, LOW);
   pinMode(PULLDOWN_2, OUTPUT); digitalWrite(PULLDOWN_2, LOW);
@@ -93,24 +108,15 @@ void setup() {
 
   pinMode(MotorFw, OUTPUT); digitalWrite(MotorFw, LOW);
   pinMode(MotorDw, OUTPUT); digitalWrite(MotorDw, LOW);
+  pinMode(MotorOnLED, OUTPUT); digitalWrite(MotorOnLED, LOW);
 
   for (int i = 0; i < NB_SERVOS; i++) {
-    byte stored  = EEPROM.read(EEPROM_ADDR[i]);
-    bool hasHome = (stored <= 180);
-
-    if (hasHome) {
-      homePos[i]  = (int)stored;
-      servoPos[i] = homePos[i];
-      moveServo(i, homePos[i]);   // drive PCA9685 channel to stored position
-      Serial.print("SERVO:"); Serial.print(i + 1);
-      Serial.print(":RESTORED:"); Serial.println(homePos[i]);
-    } else {
-      homePos[i]  = 90;
-      servoPos[i] = 90;
-      // NOT written to driver — servo stays physically where it is
-      Serial.print("SERVO:"); Serial.print(i + 1);
-      Serial.println(":NO_HOME — position manually then send HOME:SAVE");
-    }
+    // Ignore stored EEPROM positions — always start at CLOSED_POS
+    homePos[i]  = CLOSED_POS;
+    servoPos[i] = CLOSED_POS;
+    moveServo(i, CLOSED_POS);
+    Serial.print("SERVO:"); Serial.print(i + 1);
+    Serial.print(":INIT:CLOSED:"); Serial.println(CLOSED_POS);
   }
 
   Serial.println("=== Sorting System Ready ===");
@@ -145,7 +151,7 @@ void updateSensor(Sensor &s, int servoStart, int servoEnd) {
     if (!inActuation) {
       for (int i = servoStart; i < servoEnd; i++) {
         if (servoOpen[i]) {
-          moveServo(i, homePos[i]);
+          moveServo(i, CLOSED_POS);
           servoOpen[i] = false;
           Serial.print("SERVO:"); Serial.print(i + 1); Serial.println(":FORCED_CLOSE");
         }
@@ -163,28 +169,35 @@ void readSensors() {
 void readSerial() {
   if (!Serial.available()) return;
 
-  String cmd = Serial.readStringUntil('\n');
-  cmd.trim();
+  String rawCmd = Serial.readStringUntil('\n');
+  rawCmd.replace("\r", "");
+  rawCmd.trim();
 
-  if (cmd == "HOME:SAVE") {
-    for (int i = 0; i < NB_SERVOS; i++) {
-      homePos[i] = servoPos[i];   // capture current position as home
-      EEPROM.write(EEPROM_ADDR[i], (byte)homePos[i]);
-      Serial.print("HOME:SAVED:SERVO:"); Serial.print(i + 1);
-      Serial.print(":"); Serial.println(homePos[i]);
-    }
+  if (rawCmd.length() == 0) return;
+
+  int sep = rawCmd.indexOf(':');
+  if (sep <= 0) {
+    Serial.println("ERR:UNKNOWN_CMD");
     return;
   }
 
-  if (cmd.startsWith("MOTOR:")) {
-    String action = cmd.substring(6);
-    if (action == "FORWARD") {
+  String key = rawCmd.substring(0, sep);
+  String arg = rawCmd.substring(sep + 1);
+  key.trim();
+  arg.trim();
+  key.toUpperCase();
+
+  if (key == "MOTOR") {
+    arg.toUpperCase();
+    if (arg == "FORWARD") {
       digitalWrite(MotorFw, HIGH);
+      digitalWrite(MotorOnLED, HIGH);
       digitalWrite(MotorDw, LOW);
       motorRunning = true;
       Serial.println("ACK:MOTOR:FORWARD");
-    } else if (action == "STOP") {
+    } else if (arg == "STOP") {
       digitalWrite(MotorFw, LOW);
+      digitalWrite(MotorOnLED, LOW);
       digitalWrite(MotorDw, LOW);
       motorRunning = false;
       Serial.println("ACK:MOTOR:STOP");
@@ -194,12 +207,12 @@ void readSerial() {
     return;
   }
 
-  if (!cmd.startsWith("LABEL:")) {
+  if (key != "LABEL") {
     Serial.println("ERR:UNKNOWN_CMD");
     return;
   }
 
-  String category = cmd.substring(6);
+  String category = arg;
   category.toLowerCase();
 
   int idx = -1;
@@ -223,15 +236,14 @@ void actuateServo(int idx) {
   Sensor &s = sensors[(idx < 2) ? 0 : 1];
   s.triggered = false;
 
-  int openPos = constrain(homePos[idx] + OPEN_OFFSET, 0, 180);
-  if (openPos == homePos[idx]) {
-    Serial.print("WARN:SERVO:"); Serial.print(idx + 1);
-    Serial.println(":OPEN_CLAMPED — homePos too high for OPEN_OFFSET");
-  }
+  int openPos = getOpenPos(idx);
 
   moveServo(idx, openPos);
   servoOpen[idx] = true;
-  Serial.print("SERVO:"); Serial.print(idx + 1); Serial.println(":OPEN");
+  Serial.print("SERVO:"); Serial.print(idx + 1);
+  Serial.print(":OPEN:"); Serial.print(openPos);
+  Serial.print(":CATEGORY:"); Serial.print(CATEGORY_NAMES[idx]);
+  Serial.print(":CHANNEL:"); Serial.println(SERVO_CHANNELS[idx]);
 
   delay(SERVO_OPEN_MS);
   s.triggered = false;
@@ -241,19 +253,24 @@ void actuateServo(int idx) {
 
   while (millis() - start < SENSOR_TIMEOUT) {
     readSensors();
-
     if (s.triggered) {
       detected    = true;
       s.triggered = false;
-      Serial.print("SERVO:"); Serial.print(idx + 1); Serial.println(":OBJECT_DETECTED");
+      Serial.print("SERVO:"); Serial.print(idx + 1);
+      Serial.print(":OBJECT_DETECTED:");
+      Serial.print(CATEGORY_NAMES[idx]);
+      Serial.print(":CHANNEL:");
+      Serial.println(SERVO_CHANNELS[idx]);
       break;
     }
   }
 
-  moveServo(idx, homePos[idx]);
+  moveServo(idx, CLOSED_POS);
   servoOpen[idx] = false;
   inActuation    = false;
 
   Serial.print("SERVO:"); Serial.print(idx + 1);
-  Serial.println(detected ? ":CLOSED_OK" : ":CLOSED_TIMEOUT");
+  Serial.print(detected ? ":CLOSED_OK" : ":CLOSED_TIMEOUT");
+  Serial.print(":CATEGORY:"); Serial.print(CATEGORY_NAMES[idx]);
+  Serial.print(":CHANNEL:"); Serial.println(SERVO_CHANNELS[idx]);
 }
