@@ -8,51 +8,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <link rel="stylesheet" href="/static/css/style.css"/>
-  <style>
-    /* ── Log filter bar ─────────────────────────────── */
-    .log-filter-bar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-      margin-bottom: 8px;
-    }
-    .log-filter-btn {
-      font-size: 0.62rem;
-      font-family: 'DM Mono', monospace;
-      padding: 3px 9px;
-      border-radius: 6px;
-      border: 1px solid var(--border, #2e3650);
-      background: transparent;
-      color: var(--text-secondary, #9aa3b8);
-      cursor: pointer;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      transition: background 0.15s, color 0.15s;
-    }
-    .log-filter-btn:hover {
-      background: rgba(255,255,255,0.06);
-      color: #fff;
-    }
-    .log-filter-btn.active {
-      color: #fff;
-      border-color: transparent;
-    }
-    .log-filter-btn[data-filter="all"].active    { background: #374151; }
-    .log-filter-btn[data-filter="detection"].active { background: #16a34a; }
-    .log-filter-btn[data-filter="servo"].active  { background: #2563eb; }
-    .log-filter-btn[data-filter="sensor"].active { background: #9333ea; }
-    .log-filter-btn[data-filter="conveyor"].active { background: #0891b2; }
-    .log-filter-btn[data-filter="error"].active  { background: #dc2626; }
-
-    /* ── Log row category colours ──────────────────── */
-    .log-row-detection td:nth-child(2) { color: #4ade80; }
-    .log-row-servo      td:nth-child(2) { color: #60a5fa; }
-    .log-row-sensor     td:nth-child(2) { color: #c084fc; }
-    .log-row-conveyor   td:nth-child(2) { color: #22d3ee; }
-    .log-row-error      td:nth-child(2) { color: #f87171; font-weight: 600; }
-
-    .log-row-hidden { display: none; }
-  </style>
 </head>
 <body>
 
@@ -115,12 +70,12 @@
             <div class="legend-pct" id="pct-inhaler">0%</div>
           </div>
           <div class="legend-item">
-            <div class="legend-dot" style="background:var(--c-sharps)"></div>
+            <div class="legend-dot" style="background:var(--c-chemical)"></div>
             <div class="legend-info">
-              <div class="legend-name">Sharps</div>
-              <div class="legend-count" id="leg-sharps">0 objects</div>
+              <div class="legend-name">Chemical</div>
+              <div class="legend-count" id="leg-chemical">0 objects</div>
             </div>
-            <div class="legend-pct" id="pct-sharps">0%</div>
+            <div class="legend-pct" id="pct-chemical">0%</div>
           </div>
           <div class="legend-item">
             <div class="legend-dot" style="background:var(--c-canister)"></div>
@@ -159,7 +114,7 @@
       </svg>
       <span class="warning-title">Warning</span>
     </div>
-    <div class="warning-message" id="warning-message">System nominal. All sorting operations running within expected parameters.</div>
+    <div class="warning-message" id="warning-message"></div>
   </div>
 
   <!-- ── ROW 3: Debug panel (hidden by default) ── -->
@@ -226,22 +181,10 @@
     <div class="card rate-card">
       <div class="card-title">Sorting Rate</div>
       <div class="rate-value" id="sorting-rate">0</div>
-      <div class="rate-unit">sorting device / hour</div>
-      <div class="rate-trend" id="rate-trend">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-          <path d="M18 15l-6-6-6 6"/>
-        </svg>
-        +0% vs last hour
-      </div>
-      <div class="unrecognized-rate">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" width="13" height="13">
-          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-        <span id="unrecognized-rate-value">0</span> unrecognized / hour
-      </div>
+      <div class="rate-unit">Device / min</div>
     </div>
 
-    <!-- Servos: canister | sharps | applicator | inhaler -->
+    <!-- Servos: canister | chemical | applicator | inhaler -->
     <div class="card servo-card">
       <div class="card-title">Servo Motors</div>
       <div class="servo-list">
@@ -261,8 +204,8 @@
           <span class="servo-status inactive" id="servo-status-canister">Closed</span>
         </div>
 
-        <!-- Servo 2 — Sharps (pending model support) -->
-        <div class="servo-item pending" id="servo-sharps">
+        <!-- Servo 2 — Chemical -->
+        <div class="servo-item" id="servo-chemical">
           <div class="servo-icon-wrap inactive">
             <svg class="servo-svg" viewBox="0 0 24 24" fill="none" stroke="#9aa3b8" stroke-width="2" stroke-linecap="round">
               <circle cx="12" cy="12" r="3"/>
@@ -270,10 +213,10 @@
             </svg>
           </div>
           <div class="servo-info">
-            <div class="servo-name">Servo 2 — Sharps</div>
-            <div class="servo-type-tag">CHANNEL 02 · PIN 12  ·  Apply Pen / Syringes / Bag</div>
+            <div class="servo-name">Servo 2 — Chemical</div>
+            <div class="servo-type-tag">CHANNEL 02 · PIN 12</div>
           </div>
-          <span class="servo-status inactive" id="servo-status-sharps">Closed</span>
+          <span class="servo-status inactive" id="servo-status-chemical">Closed</span>
         </div>
 
         <!-- Servo 3 — Applicator -->
@@ -332,12 +275,12 @@
       </div>
     </div>
 
-    <div class="card count-card pending" style="border-top-color: var(--c-sharps);">
-      <div class="card-title">Sharps</div>
-      <div class="count-number" id="cnt-sharps" style="color:var(--c-sharps)">0</div>
+    <div class="card count-card" style="border-top-color: var(--c-chemical);">
+      <div class="card-title">Chemical</div>
+      <div class="count-number" id="cnt-chemical" style="color:var(--c-chemical)">0</div>
       <div class="count-label">objects sorted</div>
       <div class="count-bar-track">
-        <div class="count-bar-fill" id="bar-sharps" style="background:var(--c-sharps); width:0%"></div>
+        <div class="count-bar-fill" id="bar-chemical" style="background:var(--c-chemical); width:0%"></div>
       </div>
     </div>
 
@@ -520,58 +463,33 @@
     }
   }
 
-  // ── Warning banner helper ─────────────────────────────────────────────────
-  function setWarning(msg, isError) {
-    var el = document.getElementById("warning-message");
-    if (!el) return;
-    el.textContent = msg;
-    el.style.color = isError ? "#f87171" : "";
-  }
-
-  // ── Socket.IO: new events ────────────────────────────────────────────────
-  // The main socket is created by dashboard.js; we reuse window.socket if
-  // it's exposed, or create our own connection on the same server.
-
   function getSocket() {
-    // dashboard.js typically exposes the socket; fall back to a new connection
     return window.socket || (window._logSocket = window._logSocket || io());
   }
 
   document.addEventListener("DOMContentLoaded", function () {
     var socket = getSocket();
 
-    // ── Arduino errors → warning banner + log ────────────────────────────
     socket.on("system_error", function (data) {
-      var source = data.source || "system";
-      var detail = data.error  || "unknown error";
-      var msg;
-
-      if (source === "servo") {
-        msg = "Servo " + (data.index || "?") + " (" + (data.servo || "") + "): " + detail;
-      } else {
-        msg = "Arduino ERR [" + source + "]: " + detail;
-      }
-
-      setWarning("⚠ " + msg, true);
-      injectLogRow("error", "Error", msg, true);
+      var msg = (data.title && data.message)
+        ? data.title + ": " + data.message
+        : (data.error || data.message || "System error");
+      injectLogRow("error", data.severity === "info" ? "Info" : "Error", msg, data.severity !== "info");
     });
 
-    // ── Servo closed feedback (drives status label update) ────────────────
-    // dashboard.js handles update_servo; this just adds extra log detail.
+    socket.on("system_log", function (data) {
+      var msg = (data.title && data.message)
+        ? data.title + ": " + data.message
+        : (data.message || "Info");
+      injectLogRow("error", "Info", msg, false);
+    });
+
     socket.on("update_servo", function (data) {
       if (data.active === false && data.close_status) {
         var status = data.close_status === "closed_ok" ? "OK" : "TIMEOUT";
         injectLogRow("servo", "Servo",
           "Servo " + data.index + " (" + (data.type || data.label) + ") closed [" + status + "]",
-          data.close_status === "closed_timeout");
-
-        // Servo timeout → warning banner
-        if (data.close_status === "closed_timeout") {
-          setWarning(
-            "⚠ Servo " + data.index + " closed on timeout — object may not have passed.",
-            true
-          );
-        }
+          false);
       }
     });
 
@@ -592,11 +510,6 @@
     socket.on("servo_object_detected", function (data) {
       injectLogRow("servo", "Servo",
         "Servo " + data.index + " (" + data.type + ") object detected", false);
-    });
-
-    // ── System info (INFO: lines) ─────────────────────────────────────────
-    socket.on("system_info", function (data) {
-      injectLogRow("sensor", "Info", data.info || "", false);
     });
 
     // ── Change events (CHANGE: lines, for visibility) ─────────────────────

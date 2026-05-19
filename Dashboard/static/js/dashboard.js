@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════
 //  SORTING DASHBOARD — dashboard.js
-//  Categories: applicator | inhaler | sharps | canister
+//  Categories: applicator | inhaler | chemical | canister
 // ══════════════════════════════════════════
 
 // ── CLOCK ──
@@ -11,25 +11,24 @@ setInterval(updateClock, 1000);
 updateClock();
 
 // ── CATEGORY CONFIG ──
-const CATEGORIES = ['applicator', 'inhaler', 'sharps', 'canister'];
+const CATEGORIES = ['canister', 'chemical', 'applicator', 'inhaler'];
 
 const CAT_COLORS = {
   applicator:   '#3b82f6',   // blue
   inhaler:      '#a855f7',   // purple
-  sharps:       '#f97316',   // orange
+  chemical:     '#0ea5e9',   // sky blue
   canister:     '#f59e0b',   // amber
   unrecognized: '#9aa3b8',   // grey
 };
 
-// sharps has no YOLO label yet — shown greyed out
-const CAT_PENDING = { sharps: true };
+const CAT_PENDING = {};
 
 // ── PIE CHART ──
 const pieCtx = document.getElementById('pieChart').getContext('2d');
 const pieChart = new Chart(pieCtx, {
   type: 'doughnut',
   data: {
-    labels: ['Applicator', 'Inhaler', 'Sharps', 'Canister'],
+    labels: ['Canister', 'Chemical', 'Applicator', 'Inhaler'],
     datasets: [{
       data: [1, 1, 1, 1],
       backgroundColor: CATEGORIES.map(c => CAT_COLORS[c]),
@@ -52,8 +51,13 @@ const pieChart = new Chart(pieCtx, {
 });
 
 // ── LOCAL STATE ──
-const counts = { applicator: 0, inhaler: 0, sharps: 0, canister: 0 };
+const counts = { canister: 0, chemical: 0, applicator: 0, inhaler: 0 };
 const conveyorState = { 1: 'running', 2: 'running' };
+let arduinoConnected = false;
+const activeErrors = {};
+
+const NOMINAL_WARNING = 'No Errors Detected';
+const DISCONNECT_WARNING = '⚠ Arduino disconnected — conveyors are disabled.';
 
 // ── UPDATE COUNTERS ──
 function updateCounts(data) {
@@ -119,16 +123,38 @@ function setConveyorState(id, state, speed) {
     btn.className   = 'conveyor-action-btn stop-btn';
     btn.textContent = 'Stop';
   }
-  if (speedEl && speed !== null && speed !== undefined && state !== 'stopped') {
+  if (state === 'disconnected') {
+    txt.textContent = 'Disconnected';
+    btn.className   = 'conveyor-action-btn disabled-btn';
+    btn.textContent = 'Unavailable';
+    btn.disabled    = true;
+    if (speedEl) speedEl.textContent = '—';
+    led.className = 'conveyor-status-btn disconnected';
+    led.querySelector('svg').setAttribute('stroke', '#6b7280');
+  } else {
+    btn.disabled = false;
+    if (state === 'running') {
+      txt.textContent = 'Running';
+      btn.className   = 'conveyor-action-btn stop-btn';
+      btn.textContent = 'Stop';
+    } else if (state === 'stopped') {
+      txt.textContent = 'Stopped';
+      btn.className   = 'conveyor-action-btn start-btn';
+      btn.textContent = 'Start';
+      if (speedEl) speedEl.textContent = '0.0 m/s';
+    }
+  }
+  if (speedEl && speed !== null && speed !== undefined && state !== 'stopped' && state !== 'disconnected') {
     speedEl.textContent = `${speed} m/s`;
   }
 }
 
 // ── SERVO ──
-// active servo timers — auto-reset after 3 s if server doesn't send deactivate
+// Only reflects Arduino-driven activation when the board is connected.
 const _servoTimers = {};
 
 function setServoState(type, active) {
+  if (active && !arduinoConnected) return;
   const item = document.getElementById(`servo-${type}`);
   if (!item) return;
 
@@ -162,8 +188,106 @@ function setServoState(type, active) {
 }
 
 // ── WARNING ──
-function setWarning(message) {
-  document.getElementById('warning-message').textContent = message;
+function setWarning(message, isError) {
+  const el = document.getElementById('warning-message');
+  if (!el) return;
+  const banner = el.closest('[class*="warning"]') || el.parentElement;
+  if (!message || (!isError && message === NOMINAL_WARNING)) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = '';
+  el.textContent = message;
+  el.style.color = isError ? '#b91c1c' : '';
+  el.classList.toggle('warning-error', !!isError);
+}
+
+const _recentLogKeys = new Map();
+const LOG_DEDUPE_MS = 2000;
+
+function refreshWarningBanner() {
+  const parts = [];
+  const keys = Object.keys(activeErrors);
+
+  keys.forEach((k) => {
+    const e = activeErrors[k];
+    if (e.message && !parts.includes(e.message)) {
+      parts.push(e.message);
+    }
+  });
+
+  // Generic disconnect only when offline and no ErrorManager entries are active
+  if (!arduinoConnected && keys.length === 0) {
+    parts.push(DISCONNECT_WARNING);
+  }
+
+  if (parts.length > 0) {
+    setWarning(parts.join('\n'), true);
+    return;
+  }
+
+  const el = document.getElementById('warning-message');
+  if (el) el.closest('.warning-banner, [id*="warning"], [class*="warning"]').style.display = 'none';
+}
+
+function formatSystemError(data) {
+  if (data.title && data.message) {
+    return `${data.title}: ${data.message}`;
+  }
+  return data.error || data.message || 'System error';
+}
+
+function errorTrackingKey(data) {
+  return data.error_key || data.code || 'UNKNOWN';
+}
+
+function appendErrorLogRow(data) {
+  const tbody = document.getElementById('event-log-body');
+  if (!tbody) return;
+  appendLogRow(
+    data.timestamp || new Date().toISOString(),
+    'error',
+    formatSystemError(data),
+    data.details ? JSON.stringify(data.details) : '',
+    true,
+  );
+}
+
+function shouldLogError(data) {
+  const key = errorTrackingKey(data);
+  const now = Date.now();
+  const last = _recentLogKeys.get(key);
+  if (last != null && now - last < LOG_DEDUPE_MS) {
+    return false;
+  }
+  _recentLogKeys.set(key, now);
+  return true;
+}
+
+function handleSystemError(data) {
+  if (shouldLogError(data)) {
+    appendErrorLogRow(data);
+  }
+  if (data.severity === 'info') return;
+
+  const key = errorTrackingKey(data);
+  activeErrors[key] = {
+    message: `⚠ ${formatSystemError(data)}`,
+    isError: true,
+  };
+  refreshWarningBanner();
+
+  if (data.error_key === 'UNRECOGNIZED_OBJECT') {
+    const d = data.details || {};
+    showUnrecognized(
+      `Unrecognized object detected${d.display ? ': ' + d.display : ''}` +
+        (d.total !== undefined ? ` (total: ${d.total})` : ''),
+    );
+  }
+}
+
+function handleSystemLog(data) {
+  appendErrorLogRow(data);
 }
 
 // ── UNRECOGNIZED ALERT ──
@@ -321,6 +445,7 @@ function populateLogFromHistory(events) {
 //  SOCKET.IO
 // ══════════════════════════════════════════
 const socket = io();
+window.socket = socket;
 
 socket.on('connect', () => {
   console.log('Connected to Flask server ✅');
@@ -339,17 +464,30 @@ socket.on('update_conveyor',    (data) => {
     `Conveyor ${data.id} ${data.running ? 'started' : 'stopped'}`,
     `speed=${data.speed} m/s`);
 });
-socket.on('update_servo',       (data) => setServoState(data.type, data.active));
+socket.on('arduino_status', (data) => {
+  arduinoConnected = !!data.connected;
+  if (!arduinoConnected) {
+    CATEGORIES.forEach(t => setServoState(t, false));
+    [1, 2].forEach(id => setConveyorState(id, 'disconnected', null));
+  } else {
+    [1, 2].forEach(id => setConveyorState(id, conveyorState[id] || 'stopped', null));
+  }
+  refreshWarningBanner();
+});
+socket.on('system_error', (data) => handleSystemError(data));
+socket.on('system_log', (data) => handleSystemLog(data));
+socket.on('error_resolved', (data) => {
+  delete activeErrors[data.error_key || data.code];
+  refreshWarningBanner();
+});
+socket.on('update_servo', (data) => {
+  setServoState(data.type, data.active);
+});
 socket.on('servo_closed', (data) => {
   setServoState(data.type, false);
   if (debugEnabled) appendLogRow(new Date().toISOString(), 'servo',
     `Servo ${data.type} deactivated`,
     data.status || '');
-});
-socket.on('new_alert',          (data) => setWarning(data.message));
-socket.on('unrecognized_alert', (data) => {
-  showUnrecognized(`Unrecognized object detected${data.display ? ': ' + data.display : ''} (total: ${data.total})`);
-  if (debugEnabled) appendLogRow(data.timestamp || new Date().toISOString(), 'unrecognized', 'Unrecognized object', data.display || '');
 });
 socket.on('buffer_update',      (data) => renderDebugPanel(data));
 socket.on('new_detection',      (data) => {
@@ -369,10 +507,25 @@ async function loadInitialState() {
   try {
     const res  = await fetch('/api/state');
     const data = await res.json();
+    arduinoConnected = !!(data.arduino_status && data.arduino_status.connected);
     data.conveyors.forEach(c => setConveyorState(c.id, c.running ? 'running' : 'stopped', c.speed));
-    data.servos.forEach(s => setServoState(s.type, s.active));
-    updateCounts(data.counts);
-    document.getElementById('unrecognized-rate-value').textContent = data.unrecognized || 0;
+    if (arduinoConnected) {
+      data.servos.forEach(s => setServoState(s.type, s.active));
+    } else {
+      CATEGORIES.forEach(t => setServoState(t, false));
+      [1, 2].forEach(id => setConveyorState(id, 'disconnected', null));
+    }
+    if (data.active_errors) {
+      data.active_errors.forEach((err) => {
+        if (err.severity === 'info') return;
+        activeErrors[errorTrackingKey(err)] = {
+          message: `⚠ ${formatSystemError(err)}`,
+          isError: true,
+        };
+      });
+    }
+    refreshWarningBanner();
+    updateCounts({ ...data.counts, rate: data.rate, unrecognized: data.unrecognized });
     console.log('Initial state loaded ✅');
     if (data.recent_events) populateLogFromHistory(data.recent_events);
   } catch (e) {

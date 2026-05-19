@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import os
 from datetime import datetime
@@ -9,9 +10,9 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sorting_dash
 # ══════════════════════════════════════════
 # applicator  – Servo 3
 # inhaler     – Servo 4
-# sharps      – Servo 2 (Apply Pen / Syringes / Bag)
+# chemical    – Servo 2
 # canister    – Servo 1
-CATEGORIES = ["applicator", "inhaler", "sharps", "canister"]
+CATEGORIES = ["applicator", "inhaler", "chemical", "canister"]
 
 # ══════════════════════════════════════════
 #  INITIALIZATION
@@ -61,20 +62,35 @@ def init_db():
         )
     """)
 
-    # Default conveyor rows
-    c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (1, 1, 1.4)")
-    c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (2, 1, 1.2)")
+    # Default conveyor rows – all starting as OFF (running=0)
+    c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (1, 0, 1.4)")
+    c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (2, 0, 1.2)")
+    c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (3, 0, 1.0)")
 
     # Seed all 4 categories
     for t in CATEGORIES:
         c.execute("INSERT OR IGNORE INTO servos (type, active) VALUES (?, 0)", (t,))
         c.execute("INSERT OR IGNORE INTO counts (type, value) VALUES (?, 0)", (t,))
 
+    # Migrate legacy 'sharps' rows to the new 'chemical' category.
+    c.execute("INSERT OR IGNORE INTO servos (type, active) SELECT 'chemical', active FROM servos WHERE type = 'sharps'")
+    c.execute(
+        "UPDATE servos SET active = 1 WHERE type = 'chemical' AND EXISTS (SELECT 1 FROM servos WHERE type = 'sharps' AND active = 1)"
+    )
+    c.execute("DELETE FROM servos WHERE type = 'sharps'")
+
+    c.execute("INSERT OR IGNORE INTO counts (type, value) SELECT 'chemical', value FROM counts WHERE type = 'sharps'")
+    c.execute(
+        "UPDATE counts SET value = value + (SELECT value FROM counts WHERE type = 'sharps') WHERE type = 'chemical' AND EXISTS (SELECT 1 FROM counts WHERE type = 'sharps')"
+    )
+    c.execute("DELETE FROM counts WHERE type = 'sharps'")
+
     # Remove old 'hazardous' rows if they exist from a previous DB schema
     c.execute("DELETE FROM servos WHERE type = 'hazardous'")
     c.execute("DELETE FROM counts WHERE type = 'hazardous'")
 
     c.execute("INSERT OR IGNORE INTO stats (key, value) VALUES ('unrecognized', '0')")
+    c.execute("INSERT OR IGNORE INTO stats (key, value) VALUES ('sensor1_triggers', '[]')")
 
     # Always update session_start so it reflects the current run
     c.execute("INSERT OR REPLACE INTO stats (key, value) VALUES ('session_start', ?)",
@@ -123,6 +139,14 @@ def save_servo(servo_type, active):
     log_event("servo", f"Servo {servo_type} {'activated' if active else 'deactivated'}")
 
 
+def reset_all_servos():
+    """Mark every servo inactive (e.g. when Arduino disconnects)."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE servos SET active=0")
+    conn.commit()
+    conn.close()
+
+
 # ══════════════════════════════════════════
 #  COUNTERS
 # ══════════════════════════════════════════
@@ -161,6 +185,59 @@ def get_session_start():
     row = conn.execute("SELECT value FROM stats WHERE key='session_start'").fetchone()
     conn.close()
     return row[0] if row else datetime.now().isoformat()
+
+
+# ══════════════════════════════════════════
+#  SENSOR 1 — sorting rate (objects / hour)
+# ══════════════════════════════════════════
+
+_SENSOR1_MAX = 200
+
+
+def record_sensor1_trigger(ts=None):
+    """Record a sensor-1 trigger timestamp (unix float, ISO stored in DB)."""
+    if ts is None:
+        ts = datetime.now().timestamp()
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT value FROM stats WHERE key='sensor1_triggers'").fetchone()
+    triggers = json.loads(row[0]) if row else []
+    triggers.append(float(ts))
+    triggers = triggers[-_SENSOR1_MAX:]
+    conn.execute(
+        "INSERT OR REPLACE INTO stats (key, value) VALUES ('sensor1_triggers', ?)",
+        (json.dumps(triggers),),
+    )
+    conn.commit()
+    conn.close()
+    return triggers
+
+
+def get_sensor1_triggers():
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT value FROM stats WHERE key='sensor1_triggers'").fetchone()
+    conn.close()
+    if not row:
+        return []
+    try:
+        return [float(t) for t in json.loads(row[0])]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+
+
+def compute_sorting_rate(triggers=None):
+    """
+    Sorting rate (objects/hour) from sensor-1 trigger spacing.
+    Example: 2 triggers in 60 s → (2/60)*3600 = 120/h.
+    Needs at least 2 triggers; uses span from oldest to newest in the window.
+    """
+    if triggers is None:
+        triggers = get_sensor1_triggers()
+    if len(triggers) < 2:
+        return 0
+    window = triggers[-1] - triggers[0]
+    if window < 1.0:
+        window = 1.0
+    return round((len(triggers) / window) * 60)
 
 
 # ══════════════════════════════════════════

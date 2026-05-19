@@ -3,57 +3,79 @@ app.py  –  Flask + SocketIO backend for the Sorting Control Dashboard.
 
 Canonical servo / category mapping:
   canister   → Servo 1 – pin 13
-  sharps     → Servo 2 – pin 12  (YOLO label TBD)
+  chemical   → Servo 2 – pin 12
   applicator → Servo 3 – pin 8
   inhaler    → Servo 4 – pin 7
+
+Sensor mapping:
+    sensor_1 → Proximity sensor before Servo 3 (applicator/canister)
+    sensor_2 → Proximity sensor before Servo 4 (inhaler/Chemical)
+    
+
 
 SocketIO events
 ───────────────
 FROM frontend  →  control_conveyor
 FROM Pi        →  servo_update        (active=True when label committed)
                   servo_closed        (active=False, driven by Arduino CLOSED_OK/TIMEOUT)
-                  servo_error         (blocked_at_start, etc.)
                   servo_object_detected
                   sensor_update
                   yolo_detection
                   buffer_update
                   conveyor_state
-                  arduino_error       (ERR:* lines from Arduino)
-                  arduino_info        (INFO:* lines from Arduino)
                   ack_label           (ACK:LABEL:* from Arduino)
                   status_snapshot     (parsed STATUS: line)
                   change_event        (CHANGE: line)
 TO   frontend  →  update_conveyor | update_servo | update_sensor
-                  update_counts   | new_detection | unrecognized_alert
+                  update_counts   | new_detection
                   buffer_update   (relayed straight to browser)
                   servo_definitions (on connect)
-                  system_error    (arduino errors → browser)
-                  system_info
+                  system_error    (ErrorManager WARNING+ → banner + log)
+                  system_log      (ErrorManager INFO → log only)
+                  error_resolved
                   status_snapshot (relayed to browser)
 """
 
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
 from Dashboard.Database import (
     init_db,
     get_conveyors, save_conveyor,
-    get_servos,    save_servo,
+    get_servos,    save_servo, reset_all_servos,
     get_counts,    increment_count,
     get_unrecognized, increment_unrecognized,
     get_recent_events, get_session_start,
+    record_sensor1_trigger, compute_sorting_rate,
     log_event,
 )
 import datetime
+from ProgramManager.ErrorManager import get_error_manager
 
 app      = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+
+def _dashboard_emit(event, data):
+    """Emit to browsers; mark server-origin so relay handler does not re-broadcast."""
+    payload = dict(data)
+    if event in ("system_error", "system_log", "error_resolved"):
+        payload["_from_server"] = True
+    if event == "system_error" and payload.get("severity") != "info":
+        key = payload.get("error_key") or payload.get("code")
+        _active_banner_errors[key] = payload
+    socketio.emit(event, payload)
+
+
+def _err_mgr():
+    return get_error_manager(_dashboard_emit)
+
 
 init_db()
 
 # ── Canonical servo definitions ───────────────────────────────────────────────
 SERVO_DEFINITIONS = {
     "canister":   {"label": "Servo 1 – Canister",                     "index": 1},
-    "sharps":     {"label": "Servo 2 – Sharps / Apply Pen / Syringes","index": 2},
+    "chemical":   {"label": "Servo 2 – Chemical",                     "index": 2},
     "applicator": {"label": "Servo 3 – Applicator",                   "index": 3},
     "inhaler":    {"label": "Servo 4 – Inhaler",                      "index": 4},
 }
@@ -63,12 +85,63 @@ KNOWN_CATEGORIES = set(SERVO_DEFINITIONS.keys())
 # Categories stored in the event log — used by the filter UI
 LOGGED_CATEGORIES = ["detection", "servo", "sensor", "conveyor", "error"]
 
+# ── Connection State Tracking ──────────────────────────────────────────────────
+arduino_connected = False
+arduino_port = None
+arduino_connection_lock = None  # Will be initialized when needed
+
+# Last relayed banner errors (for browser refresh sync)
+_active_banner_errors = {}
+
+NOMINAL_WARNING = (
+    "System nominal. All sorting operations running within expected parameters."
+)
+DISCONNECT_WARNING = "⚠ Arduino disconnected — conveyors are disabled."
+
+
+def is_arduino_connected():
+    """Check if Arduino is currently connected."""
+    return arduino_connected
+
+
+def _current_warning():
+    """Banner text for HTTP initial load (matches live socket behaviour)."""
+    if not arduino_connected:
+        return {"message": DISCONNECT_WARNING, "is_error": True}
+    return {"message": NOMINAL_WARNING, "is_error": False}
+
+
+def _emit_counts():
+    socketio.emit("update_counts", {
+        "counts":       get_counts(),
+        "unrecognized": get_unrecognized(),
+        "rate":         compute_sorting_rate(),
+    })
+
+
+def _clear_servo_display():
+    """Reset servo UI/DB when Arduino is offline (no phantom activations)."""
+    reset_all_servos()
+    for servo_type, info in SERVO_DEFINITIONS.items():
+        socketio.emit("update_servo", {
+            "type":   servo_type,
+            "active": False,
+            "index":  info["index"],
+            "label":  info["label"],
+        })
+
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+# Digital twin (testing) — remove this route and templates/digital_twin.html to drop.
+@app.route("/digital-twin")
+def digital_twin():
+    return render_template("digital_twin.html")
 
 
 @app.route("/api/state")
@@ -81,6 +154,13 @@ def api_state():
         "unrecognized":      get_unrecognized(),
         "session_start":     get_session_start(),
         "recent_events":     get_recent_events(limit=50, categories=LOGGED_CATEGORIES),
+        "arduino_status": {
+            "connected": arduino_connected,
+            "port": arduino_port,
+        },
+        "warning":       _current_warning(),
+        "active_errors": list(_active_banner_errors.values()),
+        "rate":          compute_sorting_rate(),
     })
 
 # ── WebSocket latency test ─────────────────────────────────────────────────
@@ -96,6 +176,13 @@ def test_latency(data):
 def handle_conveyor_control(data):
     conv_id = data.get("id")
     running = data.get("command") == "start"
+    
+    if not is_arduino_connected():
+        _err_mgr().raise_error("CONTROL_CONVEYOR_BLOCKED", {
+            "conveyor_id": conv_id,
+        })
+        return
+    
     conveyors = get_conveyors()
     speed = conveyors[conv_id]["speed"] if running else 0.0
     save_conveyor(conv_id, running, speed)
@@ -125,16 +212,23 @@ def handle_conveyor_state(data):
     })
 
 
-# ── Servo activation  (Pi → server → browser) ────────────────────────────────
-# Only handles active=True (label committed by YOLO).
+# ── Servo activation  (Arduino SERVO:OPEN → Pi → server → browser) ───────────
+# YOLO may emit servo_update with active=False or from_arduino=False — ignored for UI.
 # Deactivation is handled exclusively by servo_closed (Arduino feedback).
 
 @socketio.on("servo_update")
 def handle_servo_update(data):
-    servo_type = data.get("type")
-    active     = bool(data.get("active", False))
+    servo_type    = data.get("type")
+    active        = bool(data.get("active", False))
+    from_arduino  = bool(data.get("from_arduino", False))
 
     if servo_type not in SERVO_DEFINITIONS:
+        return
+
+    if active and not from_arduino:
+        return
+
+    if active and not is_arduino_connected():
         return
 
     save_servo(servo_type, active)
@@ -143,7 +237,7 @@ def handle_servo_update(data):
     if active:
         log_event("servo",
                   f"Servo {servo_info['index']} ({servo_type}) activated",
-                  "waiting for Arduino confirmation")
+                  "Arduino SERVO:OPEN")
 
     socketio.emit("update_servo", {
         "type":   servo_type,
@@ -194,46 +288,30 @@ def handle_servo_object_detected(data):
     socketio.emit("servo_object_detected", data)
 
 
-# ── Servo error  (BLOCKED, etc.) ──────────────────────────────────────────────
+# ── Arduino connection status (Pi tracking) ────────────────────────────────────
+# Shows when Arduino is connected / disconnected to disable/enable conveyor controls
 
-@socketio.on("servo_error")
-def handle_servo_error(data):
-    servo_type = data.get("type")
-    error      = data.get("error", "unknown")
-    servo_idx  = data.get("index")
-    servo_info = SERVO_DEFINITIONS.get(servo_type, {})
+@socketio.on("arduino_connection")
+def handle_arduino_connection(data):
+    global arduino_connected, arduino_port
+    
+    arduino_connected = bool(data.get("connected", False))
+    arduino_port = data.get("port", "unknown")
+    timestamp = data.get("timestamp", datetime.datetime.now().isoformat())
+    
+    log_event("system",
+              f"Arduino {'CONNECTED' if arduino_connected else 'DISCONNECTED'}",
+              f"port={arduino_port}")
 
-    log_event("error",
-              f"Servo {servo_info.get('index', servo_idx)} ({servo_type}) error: {error}",
-              None)
-    socketio.emit("system_error", {
-        "source": "servo",
-        "servo":  servo_type,
-        "index":  servo_idx,
-        "error":  error,
+    if not arduino_connected:
+        _clear_servo_display()
+    
+    socketio.emit("arduino_status", {
+        "connected": arduino_connected,
+        "port": arduino_port,
+        "timestamp": timestamp,
+        "warning": _current_warning(),
     })
-
-
-# ── Arduino ERR lines → dashboard ─────────────────────────────────────────────
-
-@socketio.on("arduino_error")
-def handle_arduino_error(data):
-    error = data.get("error", "unknown")
-    raw   = data.get("raw", "")
-    log_event("error", f"Arduino error: {error}", raw or None)
-    socketio.emit("system_error", {
-        "source": "arduino",
-        "error":  error,
-        "raw":    raw,
-    })
-
-
-# ── Arduino INFO lines (informational relay) ───────────────────────────────────
-
-@socketio.on("arduino_info")
-def handle_arduino_info(data):
-    info = data.get("info", "")
-    socketio.emit("system_info", {"info": info})
 
 
 # ── Label ACK relay ────────────────────────────────────────────────────────────
@@ -267,6 +345,9 @@ def handle_sensor_update(data):
     log_event("sensor",
               f"Sensor {sensor_id} {'TRIGGERED' if triggered else 'clear'}",
               f"distance={distance_cm}cm" if distance_cm is not None else None)
+    if sensor_id == "sensor_1" and triggered:
+        record_sensor1_trigger()
+        _emit_counts()
     socketio.emit("update_sensor", {
         "id":          sensor_id,
         "triggered":   triggered,
@@ -285,7 +366,8 @@ def handle_buffer_update(data):
 
 @socketio.on("yolo_detection")
 def handle_yolo_detection(data):
-    label        = data.get("label", "unrecognized")
+    raw_label    = data.get("label", "unrecognized")
+    label        = str(raw_label).lower()
     confidence   = float(data.get("confidence", 0.0))
     display      = data.get("display", label.capitalize())
     breakdown    = data.get("breakdown", {})
@@ -300,10 +382,10 @@ def handle_yolo_detection(data):
     else:
         label     = "unrecognized"
         new_total = increment_unrecognized()
-        socketio.emit("unrecognized_alert", {
-            "display":   display,
-            "timestamp": timestamp,
-            "total":     new_total,
+        _err_mgr().raise_error("UNRECOGNIZED_OBJECT", {
+            "message": f"Unrecognized object: {display} (total: {new_total})",
+            "display": display,
+            "total":   new_total,
         })
 
     socketio.emit("new_detection", {
@@ -315,13 +397,37 @@ def handle_yolo_detection(data):
         "timestamp":    timestamp,
     })
 
-    socketio.emit("update_counts", {
-        "counts":       get_counts(),
-        "unrecognized": get_unrecognized(),
-    })
+    _emit_counts()
 
 
 # ── Connection lifecycle ──────────────────────────────────────────────────────
+
+@socketio.on("system_error")
+def handle_system_error_from_pi(data):
+    """Relay Pi-originated errors only (skip server broadcasts)."""
+    if data.get("_from_server"):
+        return
+    if data.get("severity") != "info":
+        key = data.get("error_key") or data.get("code")
+        _active_banner_errors[key] = data
+    socketio.emit("system_error", data)
+
+
+@socketio.on("system_log")
+def handle_system_log_from_pi(data):
+    """Relay Pi-originated INFO logs only."""
+    if data.get("_from_server"):
+        return
+    socketio.emit("system_log", data)
+
+
+@socketio.on("error_resolved")
+def handle_error_resolved(data):
+    """Relay error clear events; browser restores nominal/disconnect banner."""
+    key = data.get("error_key") or data.get("code")
+    _active_banner_errors.pop(key, None)
+    socketio.emit("error_resolved", data)
+
 
 @socketio.on("connect")
 def on_connect():
@@ -330,6 +436,12 @@ def on_connect():
 
     socketio.emit("servo_definitions", SERVO_DEFINITIONS)
 
+    socketio.emit("arduino_status", {
+        "connected": arduino_connected,
+        "port":      arduino_port,
+        "warning":   _current_warning(),
+    })
+
     for conv_id, conv in conveyors.items():
         socketio.emit("update_conveyor", {
             "id":      conv_id,
@@ -337,12 +449,14 @@ def on_connect():
             "speed":   conv.get("speed", 0.0),
         })
 
+    show_servo_active = is_arduino_connected()
     for servo_type, servo_data in servos.items():
         if servo_type in SERVO_DEFINITIONS:
             info = SERVO_DEFINITIONS[servo_type]
+            active = show_servo_active and servo_data.get("active", False)
             socketio.emit("update_servo", {
                 "type":   servo_type,
-                "active": servo_data.get("active", False),
+                "active": active,
                 "index":  info["index"],
                 "label":  info["label"],
             })
@@ -354,6 +468,11 @@ def on_connect():
             "distance_cm": None,
         })
 
+    _emit_counts()
+
+    for err in _active_banner_errors.values():
+        socketio.emit("system_error", err, to=request.sid)
+
 
 @socketio.on("disconnect")
 def on_disconnect(*args):
@@ -363,4 +482,4 @@ def on_disconnect(*args):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=False)

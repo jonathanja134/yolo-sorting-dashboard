@@ -27,7 +27,7 @@ from Database import (
 object_types = [
     "applicator",
     "ihmulator",
-    "sharps",
+    "chemical",
     "hazardous"
 ]
 
@@ -185,7 +185,7 @@ def simulate_data():
                 "Conveyor 1 speed abnormally low",
                 "Applicator sensor blocked",
                 "Hazardous objects detected in unsecured area",
-                "Sharps servo maintenance recommended"
+                "Chemical servo maintenance recommended"
             ]
             msg = random.choice(
                 messages

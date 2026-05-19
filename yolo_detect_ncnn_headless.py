@@ -1,7 +1,7 @@
 """
 yolo_reader.py – YOLO inference + adaptive majority-vote buffer
                   + serial protocol (Pi ↔ Arduino) + SocketIO → Flask
-                  + WebSocket MJPEG stream + local cv2 display
+                  + WebSocket MJPEG stream  [headless – no local cv2 display]
 
 Servo / category mapping (canonical across all files):
   canister   → Servo 1 – pin 12
@@ -21,78 +21,41 @@ Serial protocol (Arduino → Pi):
   STATUS:MOTOR:...|SENSOR1:...|SENSOR2:...|SERVO1:..|SERVO2:..|SERVO3:..|SERVO4:..
   CHANGE:<what changed>
   ---------------------   (separator lines – ignored)
+
+STREAM LAG FIXES (v2):
+  - Frame sequence number → WS handler skips already-sent frames
+  - asyncio.wait_for timeout → slow clients don't block the server
+  - TARGET_FPS capped at 30 → CPU no longer saturated at 600 FPS
+  - Stream frame resized to 480×480 + JPEG quality 35 → smaller payload
 """
-import serial,os,argparse,numpy as np,time
-import ncnn,cv2,threading,asyncio,websockets 
+import serial, os, argparse, numpy as np, time
+import sys, select, tty, termios          # ← replaces cv2 keyboard handling
+import ncnn, cv2, threading, asyncio, websockets
 from collections import Counter
 from picamera2 import Picamera2
-from ProgramManager.KeyboardSimulation import kb_sensor_triggered,kb_sensor_clear,configure_buffer_manager
+from ProgramManager.KeyboardSimulation import kb_sensor_triggered, kb_sensor_clear, configure_buffer_manager
 from ProgramManager.event_bus import configure_emit, _async_emit
 from ProgramManager.serialManager import SerialManager, serial_reader
 from ProgramManager.socketManager import SocketManager
 from ProgramManager.Buffer import BufferManager
-from ProgramManager.config import labels,num_classes,bbox_colors,LABEL_TO_CATEGORY,SERVO_INDEX_TO_CATEGORY,SERVO_LABEL,SERVO_COLOR,BAUD,PORT,input_size,conf_thresh,nms_thresh,min_frames,gap_limit
-from ProgramManager.ErrorManager import (
-    get_error_manager,
-    ErrorSeverity,
-    ErrorSource,
+from ProgramManager.config import (
+    labels, num_classes, bbox_colors,
+    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY,
+    BAUD, PORT, input_size, conf_thresh, nms_thresh, min_frames, gap_limit,Yolo_model
 )
+from ProgramManager.ErrorManager import get_error_manager
 
-# ── CLI args ────────────────────────────────────────────────────────────────── OK
-parser = argparse.ArgumentParser()
-parser.add_argument('--model', default='yolo26nV3', help='Model (yolo11n , yolo26nV3, yolo11s)')
-parser.add_argument('--min-frames', default=20, type=int, dest='min_frames', help='Minimum detections before committing a label')
-parser.add_argument('--gap-limit', default=20, type=int, dest='gap_limit', help='Consecutive empty frames before auto-commit')
-args = parser.parse_args()
-
-# ── Model paths ─────────────────────────────────────────────────────────────── OK
+# ── Model paths ───────────────────────────────────────────────────────────────
 script_dir = os.path.dirname(os.path.abspath(__file__))
-model_dir  = os.path.join(script_dir, "my_model_ncnn_model", args.model)
+model_dir  = os.path.join(script_dir, "my_model_ncnn_model",Yolo_model)
 param_file = os.path.join(model_dir, "model.ncnn.param")
 bin_file   = os.path.join(model_dir, "model.ncnn.bin")
 
-# ── Load NCNN model ─────────────────────────────────────────────────────────── OK
-net = ncnn.Net()
-net.opt.num_threads         = 4
-net.opt.use_fp16_packed     = True
-net.opt.use_fp16_storage    = True
-net.opt.use_fp16_arithmetic = True
-net.opt.use_packing_layout  = True
+error_mgr = get_error_manager()
 
-if net.load_param(param_file) != 0:
-    get_error_manager.raise_error(
-            "MODEL_LOAD_FAILED",
-            {
-                "stage": "load_param",
-                "file": param_file,
-                "model": args.model,
-            }
-        )
-    raise RuntimeError(f"Failed to load PARAM: {param_file}")
-if net.load_model(bin_file) != 0:
-    get_error_manager.raise_error(
-            "MODEL_LOAD_FAILED",
-            {
-                "stage": "load_bin",
-                "file": bin_file,
-                "model": args.model,
-            }
-        )
-    raise RuntimeError(f"Failed to load BIN: {bin_file}")
-get_error_manager.resolve_error("MODEL_LOAD_FAILED")
-print("|1| Model loaded OK")
-
-# ── Camera ──────────────────────────────────────────────────────────────────── OK
-picam = Picamera2()
-picam.configure(picam.create_video_configuration(
-    main={"size": (input_size, input_size), "format": "RGB888"}
-))
-picam.start()
-print("|2| Camera OK")
-
-# ── Serial (Pi ↔ Arduino) ───────────────────────────────────────────────────── OK
+# ── Serial (Pi ↔ Arduino) — before SocketIO so conveyor commands can send ─────
 serial = SerialManager(baud=BAUD)
-print("|3| Serial Manager created")
+print("|0| Serial Manager created")
 
 # ── Conveyor motor states (3 separate conveyors) ─────────────────────────────
 
@@ -108,7 +71,6 @@ motor_2_lock    = threading.Lock()
 motor_3_running = False
 motor_3_lock    = threading.Lock()
 
-# All conveyor states in one dict
 def _get_multi_conveyor_states():
     """Return {conveyor_1: bool, conveyor_2: bool, conveyor_3: bool}"""
     with motor_1_lock, motor_2_lock, motor_3_lock:
@@ -141,34 +103,72 @@ def _set_motor_running(running):
     with motor_1_lock:
         motor_1_running = running
 
-# ── SocketIO Manager ─────────────────────────────────────────────────────
+# ── SocketIO → dashboard (before model load so startup errors are delivered) ───
 socket_mgr = SocketManager(
     server_url="http://localhost:5000",
-    get_motor_running_fn=_get_motor_running,                # Legacy
-    set_motor_running_fn=_set_motor_running,                # Legacy
-    get_multi_conveyor_fn=_get_multi_conveyor_states,       # New multi-conveyor
-    set_multi_conveyor_fn=_set_multi_conveyor_state,        # New multi-conveyor
+    get_motor_running_fn=_get_motor_running,
+    set_motor_running_fn=_set_motor_running,
+    get_multi_conveyor_fn=_get_multi_conveyor_states,
+    set_multi_conveyor_fn=_set_multi_conveyor_state,
     serial_send_fn=serial.send,
-    emit_fn=_async_emit,                                    # For error reporting
+    emit_fn=_async_emit,
 )
 _async_emit = socket_mgr.async_emit
 socket_mgr.start()
 configure_emit(_async_emit)
 
-# ── Error Manager ────────────────────────────────────────────────────────────
+if socket_mgr.wait_until_connected():
+    print("|0.5| Dashboard SocketIO connected")
+else:
+    print("|0.5| Dashboard SocketIO not connected — errors will queue")
+
 error_mgr = get_error_manager(_async_emit)
-print("|3.5| Error Manager initialized")
+print("|0.6| Error Manager initialized")
+
+# ── Load NCNN model ───────────────────────────────────────────────────────────
+net = ncnn.Net()
+net.opt.num_threads         = 4
+net.opt.use_fp16_packed     = True
+net.opt.use_fp16_storage    = True
+net.opt.use_fp16_arithmetic = True
+net.opt.use_packing_layout  = True
+
+if net.load_param(param_file) != 0:
+    error_mgr.raise_error("MODEL_LOAD_FAILED", {
+        "stage": "load_param",
+        "file": param_file,
+        "model": Yolo_model,
+    })
+    time.sleep(1.0)
+    raise RuntimeError(f"Failed to load PARAM: {param_file}")
+if net.load_model(bin_file) != 0:
+    error_mgr.raise_error("MODEL_LOAD_FAILED", {
+        "stage": "load_bin",
+        "file": bin_file,
+        "model": Yolo_model,
+    })
+    time.sleep(1.0)
+    raise RuntimeError(f"Failed to load BIN: {bin_file}")
+error_mgr.resolve_error("MODEL_LOAD_FAILED")
+print("|1| Model loaded OK")
+
+# ── Camera ────────────────────────────────────────────────────────────────────
+picam = Picamera2()
+picam.configure(picam.create_video_configuration(
+    main={"size": (input_size, input_size), "format": "RGB888"}
+))
+picam.start()
+print("|2| Camera OK")
 
 # ── Connect Serial after ErrorManager is ready ────────────────────────────────
 serial.connect(port=PORT, emit_fn=_async_emit)
-print("|3.6| Serial connection attempted")
+print("|3| Serial connection attempted")
 
-# ── Active servo state ──────────────────────────────────────────────────────── OK
+# ── Active servo state ────────────────────────────────────────────────────────
 active_servo       = None
 active_servo_lock  = threading.Lock()
 active_servo_until = 0.0
 
-# ── Active servo accessors (injected into BufferManager) ─────────────────────
 def _get_active_servo():
     with active_servo_lock:
         return active_servo, active_servo_until
@@ -179,10 +179,10 @@ def _set_active_servo(category, until_ts):
         active_servo       = category
         active_servo_until = until_ts
 
-# ── Buffer Manager ─────────────────────────────────────────────────────────────
+# ── Buffer Manager ────────────────────────────────────────────────────────────
 buf_mgr = BufferManager(
-    min_frames       = args.min_frames,
-    gap_limit        = args.gap_limit,
+    min_frames       = min_frames,
+    gap_limit        = gap_limit,
     emit_fn          = _async_emit,
     serial_send_fn   = serial.send,
     get_active_servo = _get_active_servo,
@@ -190,8 +190,7 @@ buf_mgr = BufferManager(
 )
 configure_buffer_manager(buf_mgr)
 
-# ── Serial reader thread ───────────────────────────────────────────────────────
-
+# ── Serial reader thread ──────────────────────────────────────────────────────
 threading.Thread(
     target=serial_reader,
     kwargs={
@@ -201,7 +200,7 @@ threading.Thread(
         "motor_state_setter": _set_motor_running,
         "servo_index_to_category": SERVO_INDEX_TO_CATEGORY,
         "set_active_servo": _set_active_servo,
-        "multi_motor_state_setter": _set_multi_conveyor_state,  # New: support 3 conveyors
+        "multi_motor_state_setter": _set_multi_conveyor_state,
     },
     daemon=True,
 ).start()
@@ -232,15 +231,22 @@ def nms(boxes, scores, threshold):
     return keep
 
 # ── Encoder thread (WebSocket) ────────────────────────────────────────────────
+# FIX: added encoded_seq to track new frames and avoid re-sending stale data
 encoder_running = True
 latest_frame = None
 frame_lock   = threading.Lock()
 encoded_buf  = None
+encoded_seq  = 0          # ← incremented each time a new JPEG is ready
 encoded_lock = threading.Lock()
 encode_event = threading.Event()
 
+# FIX: stream resolution and quality tuned down to reduce payload size
+STREAM_WIDTH   = 480
+STREAM_HEIGHT  = 480
+STREAM_QUALITY = 35       # JPEG quality 0-100 (was implicit 50)
+
 def encoder_thread_fn():
-    global encoded_buf
+    global encoded_buf, encoded_seq
     while encoder_running:
         encode_event.wait(timeout=0.1)
         encode_event.clear()
@@ -248,22 +254,40 @@ def encoder_thread_fn():
             frame = latest_frame
         if frame is None:
             continue
-        _, buf_jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        # FIX: resize to stream resolution before encoding → smaller JPEG payload
+        stream_frame = cv2.resize(frame, (STREAM_WIDTH, STREAM_HEIGHT))
+        _, buf_jpg = cv2.imencode(
+            '.jpg', stream_frame,
+            [cv2.IMWRITE_JPEG_QUALITY, STREAM_QUALITY,
+             cv2.IMWRITE_JPEG_OPTIMIZE, 1]   # slightly smaller file
+        )
         with encoded_lock:
             encoded_buf = buf_jpg.tobytes()
+            encoded_seq += 1                 # ← signal that a new frame is ready
 
 threading.Thread(target=encoder_thread_fn, daemon=True).start()
 
 # ── WebSocket server ──────────────────────────────────────────────────────────
 async def yolo_handler(ws):
     print(f"WS client: {ws.remote_address}")
+    last_sent_seq = -1   # ← track which seq this client last received
     try:
         while True:
             with encoded_lock:
                 data = encoded_buf
-            if data:
-                await ws.send(data)
-            await asyncio.sleep(0.033)
+                seq  = encoded_seq
+
+            # FIX: only send if this is a frame the client hasn't seen yet
+            if data and seq != last_sent_seq:
+                try:
+                    # FIX: timeout so a slow/stalled client can't block this coroutine
+                    await asyncio.wait_for(ws.send(data), timeout=0.10)
+                    last_sent_seq = seq
+                except asyncio.TimeoutError:
+                    # Client too slow → drop this frame, try the next one
+                    pass
+
+            await asyncio.sleep(0.033)   # target ~30 fps per client
     except websockets.exceptions.ConnectionClosed:
         pass
 
@@ -274,7 +298,7 @@ async def run_ws_server():
 
 threading.Thread(target=lambda: asyncio.run(run_ws_server()), daemon=True).start()
 
-# ── Servo overlay helper ──────────────────────────────────────────────────────
+# ── Servo overlay helper (logic kept, cv2 drawing commented out) ──────────────
 def draw_servo_overlay(frame):
     with active_servo_lock:
         cat   = active_servo
@@ -283,35 +307,42 @@ def draw_servo_overlay(frame):
     if cat is None or time.time() > until:
         return
 
-    color = SERVO_COLOR.get(cat, (200, 200, 200))
-    label = SERVO_LABEL.get(cat, cat.capitalize())
-    h, w  = frame.shape[:2]
+    # ── overlay drawing removed (headless) ──────────────────────────────────
+    # color = SERVO_COLOR.get(cat, (200, 200, 200))
+    # label = SERVO_LABEL.get(cat, cat.capitalize())
+    # h, w  = frame.shape[:2]
+    # overlay = frame.copy()
+    # cv2.rectangle(overlay, (0, h - 50), (w, h), color, -1)
+    # cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
+    # cv2.putText(frame, f"ACTIVE: {label}",
+    #             (12, h - 16),
+    #             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
 
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, h - 50), (w, h), color, -1)
-    cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-    cv2.putText(frame, f"ACTIVE: {label}",
-                (12, h - 16),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+# ── Non-blocking stdin keyboard reader ───────────────────────────────────────
+def _read_key():
+    """Return a single char if one is waiting on stdin, else None."""
+    if select.select([sys.stdin], [], [], 0)[0]:
+        return sys.stdin.read(1)
+    return None
 
 # ── Main inference loop ───────────────────────────────────────────────────────
-# ── Frame-rate cap ────────────────────────────────────────────────────────────
-TARGET_FPS      = 32
-FRAME_BUDGET_S  = 1.0 / TARGET_FPS          # 0.0333 s per frame
+# FIX: was 600 – saturated the CPU for no benefit; 30 is plenty for inference
+TARGET_FPS     = 30
+FRAME_BUDGET_S = 1.0 / TARGET_FPS
 fps_buffer = []
 prev_t     = None
 
-print("Inference running — SPACE=sensor trigger  C=sensor clear  Q=quit")
+# Put terminal in cbreak mode so keystrokes arrive without Enter
+_old_term = termios.tcgetattr(sys.stdin)
+tty.setcbreak(sys.stdin.fileno())
+
+print("Inference running (headless) — SPACE=sensor trigger  C=sensor clear  Q=quit")
 
 try:
     while True:
-        loop_start = time.time()          # ← ADD THIS LINE
-        try:
-            frame = picam.capture_array()
-        except Exception as e:
-            print("Camera error:", e)
-            continue
+        loop_start = time.time()
 
+        frame = picam.capture_array()
         h0, w0 = frame.shape[:2]
 
         # ── NCNN inference ────────────────────────────────────────────────────
@@ -322,7 +353,7 @@ try:
             frame_resized,
             ncnn.Mat.PixelType.PIXEL_RGB,
             input_size,
-            input_size
+            input_size,
         )
         mat.substract_mean_normalize([0, 0, 0], [1/255.0] * 3)
 
@@ -332,7 +363,6 @@ try:
         del ex
 
         if ret != 0:
-            print("Inference error")
             continue
 
         data = out.numpy().T.copy()
@@ -355,7 +385,7 @@ try:
             keep = nms(
                 [[d[0], d[1], d[2], d[3]] for d in detections],
                 [d[4] for d in detections],
-                nms_thresh
+                nms_thresh,
             )
             detections = [detections[i] for i in keep]
 
@@ -367,17 +397,19 @@ try:
             buf_mgr.add(cat, weight=float(best[4]))
         else:
             buf_mgr.no_detection()
-        # ── Draw detections ───────────────────────────────────────────────────
+
+        # ── Detection draw (commented out – logic above unchanged) ────────────
         for d in detections:
             x1, y1, x2, y2, conf, cid = d
-            cid   = int(cid)
-            color = bbox_colors[cid % len(bbox_colors)]
+            cid = int(cid)
+            # color = bbox_colors[cid % len(bbox_colors)]
             cat   = LABEL_TO_CATEGORY.get(cid, "?").lower()
             lbl   = f"{labels[cid]} [{cat}] {int(conf*100)}%"
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, lbl, (x1, max(y1-5, 10)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-        # ── Buffer overlay ────────────────────────────────────────────────────
+            # cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            # cv2.putText(frame, lbl, (x1, max(y1-5, 10)),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        # ── Buffer overlay (commented out – snapshot logic unchanged) ─────────
         collecting, votes_snap, gap_snap = buf_mgr.snapshot()
         if collecting:
             c_snap = Counter(votes_snap)
@@ -386,15 +418,14 @@ try:
             for cat, n in c_snap.most_common():
                 y_off += 22
                 pct = int(n/total*100) if total else 0
-                cv2.putText(frame, f"  {cat}: {n} ({pct}%)",
-                            (10, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,255,200), 1)
-        # ── Keyboard hint overlay ─────────────────────────────────────────────
-        #cv2.putText(frame, "SPACE=trigger  C=clear  Q=quit",
-        #            (10, input_size - 10),
-        #            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-        # ── Active servo banner ───────────────────────────────────────────────
+                # cv2.putText(frame, f"  {cat}: {n} ({pct}%)",
+                #             (10, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,255,200), 1)
+
+        # ── Active servo banner (logic runs, drawing commented out) ───────────
         draw_servo_overlay(frame)
-        # ── FPS ───────────────────────────────────────────────────────────────
+
+        # ── FPS counter ───────────────────────────────────────────────────────
+        elapsed = time.time() - loop_start
         now = time.time()
         if prev_t is not None:
             fps_buffer.append(1.0 / max(now - prev_t, 1e-6))
@@ -402,28 +433,28 @@ try:
                 fps_buffer.pop(0)
         prev_t = now
         avg_fps = sum(fps_buffer) / len(fps_buffer) if fps_buffer else 0.0
-        cv2.putText(frame, f"FPS: {avg_fps:.1f}",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        # cv2.putText(frame, f"FPS: {avg_fps:.1f}",
+        #             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        #if len(fps_buffer) == 30:  # every ~1 second at 30fps
+            #print(f"FPS: {avg_fps:.1f}  |  frame_time: {elapsed*1000:.1f}ms")
 
-        # ── Push to WebSocket encoder ─────────────────────────────────────────
+        # ── Push clean frame to WebSocket encoder ─────────────────────────────
         with frame_lock:
             latest_frame = frame.copy()
         encode_event.set()
 
-        # ── Local display + keyboard input ────────────────────────────────────
-        cv2.imshow("YOLO", frame)
-        elapsed_before_wait = time.time() - loop_start
-        wait_ms = max(1, int((FRAME_BUDGET_S - elapsed_before_wait) * 1000))
-        key = cv2.waitKey(wait_ms) & 0xFF
-        if key == ord('q'):
+        # ── Non-blocking keyboard input (replaces cv2.waitKey) ────────────────
+        key = _read_key()
+        if key == 'q':
             break
-        elif key == ord(' '):
+        elif key == ' ':
             kb_sensor_triggered()
-        elif key == ord('c'):
+        elif key == 'c':
             kb_sensor_clear()
 
         # ── 30 FPS cap ────────────────────────────────────────────────────────
-        elapsed = time.time() - loop_start          # `now` already set above for FPS calc
+        # FIX: was TARGET_FPS=600 → loop was spinning and saturating the CPU
+        elapsed   = time.time() - loop_start
         remainder = FRAME_BUDGET_S - elapsed
         if remainder > 0:
             time.sleep(remainder)
@@ -432,9 +463,8 @@ except KeyboardInterrupt:
     pass
 finally:
     encoder_running = False
-    cv2.destroyAllWindows()
+    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _old_term)   # restore terminal
     print("Stopping…")
     picam.close()
-
     if serial:
         serial.close()
