@@ -3,261 +3,378 @@ import serial.tools.list_ports
 import time
 from ProgramManager.config import BAUD, PORT
 from ProgramManager.ErrorManager import get_error_manager
+import threading
 
-def _handle_status_line(line: str, emit_fn):
-    """
-    Parse STATUS:MOTOR:FORWARD|SENSOR1:CLEAR|... and emit a snapshot
-    so the dashboard can sync state after any Arduino change.
-    """
-    content = line[7:]  # strip "STATUS:"
-    snapshot = {}
-    for token in content.split("|"):
-        kv = token.split(":", 1)
-        if len(kv) == 2:
-            snapshot[kv[0]] = kv[1]
-    emit_fn("status_snapshot", snapshot)
 
-def serial_reader(serial_manager, emit_fn, buffer_manager, motor_state_setter, servo_index_to_category, set_active_servo, multi_motor_state_setter=None):
+def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_category, set_active_servo, multi_motor_state_setter=None):
     """
     Read from serial port and dispatch events.
     Tracks and emits Arduino connection status.
     """
     error_mgr = get_error_manager(emit_fn)
     last_connection_state = None
-    
+    unwired_servos = {}  # servo_idx -> {category, detail}
+    # Track simple lamp + motor state so we can emit lamp updates
+    lamp_state = {
+        "red":    False,   # E-STOP
+        "green":  False,   # Conveyor running
+        "orange": False,   # Conveyor stopped (and e-stop NOT active)
+        "blue":   False,   # UV on
+    }
+    motor_running  = False
+    estop_active   = False
+
+    def _sync_servo_not_wired_error():
+        if not unwired_servos:
+            error_mgr.resolve_error("SERVO_NOT_WIRED")
+            return
+        parts = []
+        for idx in sorted(unwired_servos):
+            entry = unwired_servos[idx]
+            parts.append(f"Servo {idx} ({entry['category']}): {entry['detail']}")
+        error_mgr.raise_error("SERVO_NOT_WIRED", {
+            "message": "Servo(s) not wired: " + "; ".join(parts),
+            "servo_indices": sorted(unwired_servos.keys()),
+            "unwired_servos": {k: dict(v) for k, v in unwired_servos.items()},
+        })
+
     while True:
         current_connected = serial_manager.serial_ok()
-        
-        # Emit connection state changes
+
+        # ── Emit connection state changes ──────────────────────────────────────
         if current_connected != last_connection_state:
             last_connection_state = current_connected
             if current_connected:
                 error_mgr.resolve_error("SERIAL_NOT_CONNECTED")
+                unwired_servos.clear()
+                error_mgr.resolve_error("SERVO_NOT_WIRED")
                 print("[SERIAL] ✓ Arduino connected")
                 emit_fn("arduino_connection", {
-                    "connected": True,
-                    "port": serial_manager.port,
-                    "timestamp": time.time(),
+                    "connected":  True,
+                    "port":       serial_manager.port,
+                    "timestamp":  time.time(),
                 })
             else:
                 error_mgr.raise_error("SERIAL_NOT_CONNECTED", {
-                    "port": serial_manager.port,
+                    "port":   serial_manager.port,
                     "reason": "Connection lost or not established",
                 })
                 emit_fn("arduino_connection", {
                     "connected": False,
-                    "port": serial_manager.port,
+                    "port":      serial_manager.port,
                     "timestamp": time.time(),
                 })
-        
+
         if not serial_manager.serial_ok():
             time.sleep(0.1)
             continue
+
         try:
             line = serial_manager.read_line()
             if not line:
                 continue
             print(f"[SERIAL <-] {line}")
+            # Receiving any valid line means the Arduino is talking — clear connection warning
+            error_mgr.resolve_error("SERIAL_NOT_CONNECTED")
+
             # separator lines
             if line.startswith("---"):
                 continue
-            # status snapshot
-            if line.startswith("STATUS:"):
-                _handle_status_line(line, emit_fn)
-                continue
-            # change annotation (log only)
-            if line.startswith("CHANGE:"):
-                emit_fn("change_event", {"change": line[7:]})
-                continue
+
             parts = line.split(":")
+
+            if line == "ESTOP:ACTIVE":
+                estop_active   = True
+                motor_running  = False
+                lamp_state_updates = {}
+                if not lamp_state.get('red'):
+                    lamp_state_updates['red']   = True
+                    lamp_state['red']           = True
+                if lamp_state.get('green'):
+                    lamp_state_updates['green'] = False
+                    lamp_state['green']         = False
+                if lamp_state.get('orange'):
+                    lamp_state_updates['orange'] = False
+                    lamp_state['orange']         = False
+                if lamp_state.get('blue'):
+                    lamp_state_updates['blue'] = False
+                    lamp_state['blue']         = False
+                if lamp_state_updates:
+                    emit_fn('lamp_update', lamp_state)
+                error_mgr.raise_error("ESTOP_ACTIVE")
+                continue
+
+            elif line == "ESTOP:CLEARED":
+                estop_active = False
+                lamp_state_updates = {}
+                if lamp_state.get('red'):
+                    lamp_state_updates['red'] = False
+                    lamp_state['red']         = False
+                orange_should = (not motor_running) and (not estop_active)
+                if lamp_state.get('orange') != orange_should:
+                    lamp_state_updates['orange'] = orange_should
+                    lamp_state['orange']         = orange_should
+                if lamp_state_updates:
+                    emit_fn('lamp_update', lamp_state)
+                error_mgr.resolve_error("ESTOP_ACTIVE")
+                error_mgr.log_info("ESTOP_CLEARED")
+                continue
+
             # sensor events
             if len(parts) == 3 and parts[0] == "SENSOR":
                 sensor_id = parts[1]
-                event = parts[2]
-                # reset: commit previous, start fresh
+                event     = parts[2]
                 if sensor_id == "RESET" and event == "TRIGGERED":
                     buffer_manager.handle_reset()
                     continue
-                # position sensors 1 and 2: dashboard only
-                emit_fn(
-                    "sensor_update",
-                    {
-                        "id": f"sensor_{sensor_id}",
-                        "triggered": event == "TRIGGERED",
-                        "distance_cm": None,
-                    },
-                )
+                emit_fn("sensor_update", {
+                    "id":           f"sensor_{sensor_id}",
+                    "triggered":    event == "TRIGGERED",
+                    "distance_cm":  None,
+                })
                 continue
-            # motor ack -> update conveyor state on dashboard
-            # Supports both old (ACK:MOTOR:FORWARD) and new (ACK:MOTOR1:FORWARD, etc.) formats
+
+            # motor ack
             if len(parts) >= 3 and parts[0] == "ACK" and parts[1].startswith("MOTOR"):
-                motor_id = parts[1]  # "MOTOR", "MOTOR1", "MOTOR2", "MOTOR3"
-                status = parts[2]    # "FORWARD" or "STOP"
+                status  = parts[2]
                 running = status == "FORWARD"
-                
-                # Map motor ID to conveyor ID
-                if motor_id == "MOTOR":
-                    # Legacy: ACK:MOTOR:FORWARD -> conveyor_1
-                    conv_id = "conveyor_1"
-                    motor_state_setter(running)
-                else:
-                    # New: ACK:MOTOR1:FORWARD -> conveyor_1, ACK:MOTOR2:FORWARD -> conveyor_2, etc.
-                    try:
-                        motor_num = int(motor_id[5:])  # Extract number from "MOTORx"
-                        conv_id = f"conveyor_{motor_num}"
-                        if multi_motor_state_setter:
-                            multi_motor_state_setter(conv_id, running)
-                        else:
-                            # Fallback to legacy if multi not provided
-                            if conv_id == "conveyor_1":
-                                motor_state_setter(running)
-                    except (ValueError, IndexError):
-                        error_mgr.raise_error("SERIAL_PARSE_ERROR", {
-                            "message": f"MOTOR parse error: {line}",
-                            "message_type": "MOTOR",
-                            "raw": line,
-                        })
-                        continue
-                
-                print(f"[ARDUINO -> YOLO] {conv_id} state = {'RUNNING' if running else 'STOP'}")
-                emit_fn(
-                    "conveyor_state",
-                    {
-                        "id": conv_id,
-                        "running": running,
-                    },
-                )
+                conv_ids = ("conveyor_1", "conveyor_2", "conveyor_3")
+                for conv_id in conv_ids:
+                    multi_motor_state_setter(conv_id, running)
+                    emit_fn("conveyor_state", {"id": conv_id, "running": running})
+                print(f"[ARDUINO -> YOLO] motor = {'RUNNING' if running else 'STOP'}")
+                motor_running = running
+                lamp_state_updates = {}
+                if lamp_state.get('green') != motor_running:
+                    lamp_state['green'] = motor_running
+                    lamp_state_updates['green'] = motor_running
+                orange_should = (not motor_running) and (not estop_active)
+                if lamp_state.get('orange') != orange_should:
+                    lamp_state['orange'] = orange_should
+                    lamp_state_updates['orange'] = orange_should
+                if lamp_state_updates:
+                    emit_fn('lamp_update', lamp_state)
                 continue
+
+            # system start/stop from physical button
+            if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM":
+                running = parts[2] == "STARTED"
+                for conv_id in ("conveyor_1", "conveyor_2", "conveyor_3"):
+                    multi_motor_state_setter(conv_id, running)
+                    emit_fn("conveyor_state", {"id": conv_id, "running": running})
+                print(f"[ARDUINO BUTTON] System {'STARTED' if running else 'STOPPED'}")
+                motor_running = running
+                lamp_state_updates = {}
+                if lamp_state.get('green') != motor_running:
+                    lamp_state['green'] = motor_running
+                    lamp_state_updates['green'] = motor_running
+                orange_should = (not motor_running) and (not estop_active)
+                if lamp_state.get('orange') != orange_should:
+                    lamp_state['orange'] = orange_should
+                    lamp_state_updates['orange'] = orange_should
+                if lamp_state_updates:
+                    emit_fn('lamp_update', lamp_state)
+                continue
+
             # label ack
             if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "LABEL":
                 category = parts[2].lower()
                 emit_fn("ack_label", {"category": category})
                 continue
+
+            # UV ack
+            if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "UV":
+                uv_on = parts[2] == "ON"
+                if lamp_state.get('blue') != uv_on:
+                    lamp_state['blue'] = uv_on
+                    emit_fn('lamp_update', lamp_state)
+                continue
+
             # servo events
             if len(parts) >= 3 and parts[0] == "SERVO":
                 try:
                     servo_idx = int(parts[1])
-                    event = parts[2]
+                    event     = parts[2]
                 except (ValueError, IndexError):
                     error_mgr.raise_error("SERIAL_PARSE_ERROR", {
-                        "message": f"SERVO parse error: {line}",
+                        "message":      f"SERVO parse error: {line}",
                         "message_type": "SERVO",
-                        "raw": line,
+                        "raw":          line,
                     })
                     continue
                 category = servo_index_to_category.get(servo_idx)
                 if category is None:
                     error_mgr.raise_error("SERVO_INVALID_INDEX", {
-                        "message": f"Unknown servo index {servo_idx}",
+                        "message":     f"Unknown servo index {servo_idx}",
                         "servo_index": servo_idx,
-                        "raw": line,
+                        "raw":         line,
                     })
                     continue
                 if event == "OPEN":
                     error_mgr.resolve_error("SERVO_BLOCKED")
-                    emit_fn(
-                        "servo_update",
-                        {
-                            "type": category,
-                            "active": True,
-                            "from_arduino": True,
-                        },
-                    )
+                    if servo_idx in unwired_servos:
+                        del unwired_servos[servo_idx]
+                        _sync_servo_not_wired_error()
+                    emit_fn("servo_update", {
+                        "type":         category,
+                        "active":       True,
+                        "from_arduino": True,
+                    })
                 elif event == "OBJECT_DETECTED":
-                    emit_fn(
-                        "servo_object_detected",
-                        {
-                            "type": category,
-                            "index": servo_idx,
-                        },
-                    )
+                    emit_fn("servo_object_detected", {
+                        "type":  category,
+                        "index": servo_idx,
+                    })
                 elif event in ("CLOSED_OK", "CLOSED_TIMEOUT"):
-                    # Primary servo deactivation path - driven by Arduino feedback.
                     if event == "CLOSED_TIMEOUT":
                         error_mgr.raise_error("SERVO_TIMEOUT", {
                             "message": (
                                 f"Servo {servo_idx} ({category}) closed on timeout — "
                                 "object may not have passed."
                             ),
-                            "servo_type": category,
+                            "servo_type":  category,
                             "servo_index": servo_idx,
                         })
                     else:
                         error_mgr.resolve_error("SERVO_TIMEOUT")
                     set_active_servo(None, 0.0)
-                    emit_fn(
-                        "servo_closed",
-                        {
-                            "type": category,
-                            "index": servo_idx,
-                            "status": event.lower(),
-                        },
-                    )
+                    emit_fn("servo_closed", {
+                        "type":   category,
+                        "index":  servo_idx,
+                        "status": event.lower(),
+                    })
                 elif event == "BLOCKED":
                     error_mgr.raise_error("SERVO_BLOCKED", {
-                        "message": f"Servo {servo_idx} ({category}) blocked at start",
-                        "servo_type": category,
+                        "message":     f"Servo {servo_idx} ({category}) blocked at start",
+                        "servo_type":  category,
                         "servo_index": servo_idx,
                     })
                 continue
-            # error messages -> relay to dashboard
+
+            if parts[0] == "ERR" and len(parts) >= 4 and parts[1] == "SERVO":
+                try:
+                    servo_idx = int(parts[2])
+                    category  = servo_index_to_category.get(servo_idx, f"servo_{servo_idx}")
+                except (ValueError, IndexError):
+                    servo_idx = -1
+                    category  = "unknown"
+                detail = ":".join(parts[3:])
+                unwired_servos[servo_idx] = {
+                    "category": category,
+                    "detail":   detail,
+                    "raw":      line,
+                }
+                _sync_servo_not_wired_error()
+                continue
+
+            # generic error messages
             if parts[0] == "ERR":
                 detail = ":".join(parts[1:])
                 error_mgr.raise_error("ARDUINO_ERR", {
                     "message": detail,
-                    "raw": line,
+                    "raw":     line,
                 })
+                if detail.strip().upper() == "UNKNOWN_CMD":
+                    def _clear_unknown_cmd():
+                        try:
+                            error_mgr.resolve_error("ARDUINO_ERR")
+                        except Exception:
+                            pass
+                    t = threading.Timer(10.0, _clear_unknown_cmd)
+                    t.daemon = True
+                    t.start()
                 continue
+
             if parts[0] == "INFO":
                 detail = ":".join(parts[1:])
                 error_mgr.log_info("ARDUINO_INFO", {
                     "message": detail,
-                    "raw": line,
+                    "raw":     line,
                 })
                 continue
-            # boot/ready banner - ignore
+
             if "Sorting System Ready" in line:
                 continue
-            # anything unrecognized
+
             error_mgr.raise_error("SERIAL_UNRECOGNIZED_LINE", {
                 "message": f"Unrecognised serial line: {line}",
-                "raw": line,
+                "raw":     line,
             })
+
         except Exception as e:
             print(f"[SERIAL] read error: {e}")
-            error_mgr.raise_error("SERIAL_READ_ERROR", {
-                "exception": str(e),
-            })
+            error_mgr.raise_error("SERIAL_READ_ERROR", {"exception": str(e)})
             time.sleep(0.05)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+
 class SerialManager:
+    """
+    Manages the serial connection to the Arduino.
+
+    Key design decisions
+    ────────────────────
+    • Uses threading.RLock so the reconnect thread can call connect() while
+      already holding the lock (fixes the previous non-reentrant deadlock).
+    • _disconnect() is the single place that tears down the connection and
+      marks the object as unavailable.
+    • _auto_reconnect_loop() tries every candidate port on every pass so a
+      re-enumerated Arduino (different /dev/ttyACMx number) is still found.
+    • After a successful reconnect the RX buffer is flushed so stale bytes
+      from the previous session can't corrupt the first message.
+    """
+
+    # How long to pause between reconnect attempts (seconds)
+    _RECONNECT_INTERVAL = 2.0
+    # How long to wait for the Arduino to finish booting after opening the port
+    _BOOT_DELAY = 2.0
+
     def __init__(self, baud=BAUD):
-        self.baud = baud
-        self.ser = None
-        self.port = None
+        self.baud      = baud
+        self.ser       = None
+        self.port      = None
         self.available = False
-        
-    # ── PORT DETECTION ─────────────────────────────d
-    def find_arduino_port(self):
-        ports = serial.tools.list_ports.comports()
-        candidates = []
-    
-        for p in ports:
-            d = p.device
-            # Linux
-            if "/dev/ttyACM" in d or "/dev/ttyUSB" in d:
-                candidates.append(d)
-            # macOS
-            elif "usbmodem" in d or "usbserial" in d or "/dev/tty." in d:
-                candidates.append(d)
-            # Windows
-            elif d.startswith("COM"):
-                candidates.append(d)
-    
-        for port in candidates:
+
+        # RLock lets the same thread re-enter (fixes deadlock vs plain Lock)
+        self._connect_lock   = threading.RLock()
+        self._stop_reconnect = False
+
+        self._reconnect_thread = threading.Thread(
+            target=self._auto_reconnect_loop, daemon=True
+        )
+        self._reconnect_thread.start()
+
+    # ── PORT DETECTION ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_arduino_port(device: str) -> bool:
+        """Return True if the port device path looks like an Arduino."""
+        return (
+            "/dev/ttyACM" in device
+            or "/dev/ttyUSB" in device
+            or "usbmodem"   in device
+            or "usbserial"  in device
+            or device.startswith("COM")
+        )
+
+    def _list_candidate_ports(self) -> list:
+        """Return device strings for all ports that look like an Arduino."""
+        return [
+            p.device
+            for p in serial.tools.list_ports.comports()
+            if self._is_arduino_port(p.device)
+        ]
+
+    def find_arduino_port(self) -> str | None:
+        """
+        Probe each candidate port and return the first one that accepts a
+        connection, or None if none respond.
+        """
+        for port in self._list_candidate_ports():
             try:
                 ser = serial.Serial(port, self.baud, timeout=0.05)
-                time.sleep(2)
+                time.sleep(self._BOOT_DELAY)
                 ser.write(b"\n")
                 ser.close()
                 print(f"[SERIAL] Arduino found on {port}")
@@ -266,103 +383,166 @@ class SerialManager:
                 continue
         return None
 
-    # ── CONNECT ────────────────────────────────────
-    def connect(self, port=None, emit_fn=None):
+    # ── INTERNAL HELPERS ──────────────────────────────────────────────────────
+
+    def _disconnect(self):
+        """Tear down the current connection (safe to call multiple times)."""
+        with self._connect_lock:
+            if self.ser is not None:
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+                self.ser = None
+            self.available = False
+
+    def _open_port(self, port: str) -> bool:
         """
-        Connect to Arduino on specified or detected port.
-        Args:
-            port: Explicit port name or None to auto-detect
-            emit_fn: Optional callback to emit connection errors
+        Open *port*, wait for the Arduino to boot, flush stale RX bytes, and
+        update internal state.  Returns True on success.
+        Called with self._connect_lock already held.
+        """
+        try:
+            ser = serial.Serial(port, self.baud, timeout=0.05)
+            time.sleep(self._BOOT_DELAY)   # wait for Arduino bootloader
+            ser.reset_input_buffer()        # discard stale bytes from old session
+            self.ser       = ser
+            self.port      = port
+            self.available = True
+            print(f"[SERIAL] Connected on {port}")
+            return True
+        except Exception as e:
+            print(f"[SERIAL WARNING] Could not open {port}: {e}")
+            return False
+
+    # ── AUTO RECONNECT ────────────────────────────────────────────────────────
+
+    def _auto_reconnect_loop(self):
+        """
+        Background thread.  Whenever the connection is down it scans *all*
+        candidate ports (not just the first) so the Arduino is found even if
+        it re-enumerates on a different /dev/ttyACMx number after being
+        unplugged and plugged back in.
+        """
+        while not self._stop_reconnect:
+            try:
+                if self.serial_ok():
+                    time.sleep(1.0)
+                    continue
+
+                candidates = self._list_candidate_ports()
+                if not candidates:
+                    time.sleep(1.0)
+                    continue
+
+                connected = False
+                for port in candidates:
+                    with self._connect_lock:
+                        # Double-check: another thread may have connected already
+                        if self.serial_ok():
+                            connected = True
+                            break
+                        if self._open_port(port):
+                            connected = True
+                            break
+
+                # Back off before the next probe regardless of outcome
+                time.sleep(self._RECONNECT_INTERVAL if not connected else 1.0)
+
+            except Exception:
+                time.sleep(1.0)
+
+    # ── PUBLIC API ────────────────────────────────────────────────────────────
+
+    def connect(self, port: str | None = None, emit_fn=None):
+        """
+        Connect to the Arduino.
+
+        If *port* is given it is tried first; if that fails (or no port is
+        given) auto-detection is used as a fallback.
         """
         error_mgr = get_error_manager(emit_fn)
-        
-        if port:
-            self.port = port
-            try:
-                self.ser = serial.Serial(self.port, self.baud, timeout=0.05)
-                time.sleep(2)
-                self.available = True
-                print(f"[SERIAL] Connected on explicit port {self.port}")
+
+        with self._connect_lock:
+            # Try the explicit port first
+            if port and self._open_port(port):
                 return
-            except Exception as e:
-                self.ser = None
+
+            if port:
+                # Explicit port failed — warn and fall through to auto-detect
+                msg = f"Explicit port {port} failed, falling back to auto-detect"
+                print(f"[SERIAL WARNING] {msg}")
+                if error_mgr:
+                    error_mgr.raise_error("SERIAL_CONNECT_FAILED", {
+                        "port":   port,
+                        "reason": msg,
+                    })
+
+            # Auto-detect
+            detected = self.find_arduino_port()
+            if detected is None:
+                self.available = False
+                if error_mgr:
+                    error_mgr.raise_error("SERIAL_PORT_NOT_FOUND", {
+                        "reason": "No Arduino detected on any available port",
+                    })
+                print("[SERIAL WARNING] No Arduino detected — running in OFFLINE mode")
+                return
+
+            if not self._open_port(detected):
                 self.available = False
                 if error_mgr:
                     error_mgr.raise_error("SERIAL_CONNECT_FAILED", {
-                        "port": self.port,
-                        "reason": str(e),
+                        "port":   detected,
+                        "reason": "Port found but could not be opened",
                     })
-                print(f"[SERIAL WARNING] Failed to connect on explicit port {self.port}: {e}")
+                print(f"[SERIAL WARNING] Failed to open detected port {detected} — OFFLINE mode")
 
-        self.port = self.find_arduino_port()
-        if self.port is None:
-            self.available = False
-            if error_mgr:
-                error_mgr.raise_error("SERIAL_PORT_NOT_FOUND", {
-                    "reason": "No Arduino detected on any available port",
-                })
-            print("[SERIAL WARNING] No Arduino detected — running in OFFLINE mode")
-            return
-        try:
-            self.ser = serial.Serial(self.port, self.baud, timeout=0.05)
-            time.sleep(2)
-            self.available = True
-            print(f"[SERIAL] Connected on {self.port}")
-        except Exception as e:
-            self.ser = None
-            self.available = False
-            if error_mgr:
-                error_mgr.raise_error("SERIAL_CONNECT_FAILED", {
-                    "port": self.port,
-                    "reason": str(e),
-                })
-            print(f"[SERIAL WARNING] Failed to connect: {e} — OFFLINE mode")
-
-    # ── CHECK ───────────────────────────────────────
-    def serial_ok(self):
+    def serial_ok(self) -> bool:
+        """Return True only when the serial port is open and usable."""
         return self.ser is not None and getattr(self.ser, "is_open", False)
 
-    # ── SEND ───────────────────────────────────────
     def send(self, msg: str, emit_fn=None):
-        """Send a message to Arduino."""
+        """Send a newline-terminated message to the Arduino."""
         error_mgr = get_error_manager(emit_fn)
-        
+
         if not self.serial_ok():
-            msg_short = msg[:50] + "..." if len(msg) > 50 else msg
-            print(f"[SERIAL WARNING] write ignored because serial is not connected: {msg_short}")
+            short = msg[:50] + "..." if len(msg) > 50 else msg
+            print(f"[SERIAL WARNING] write ignored — not connected: {short}")
             if error_mgr:
                 error_mgr.raise_error("SERIAL_NOT_CONNECTED", {
-                    "attempted_message": msg_short,
+                    "attempted_message": short,
                 })
             return
         try:
             self.ser.write((msg + "\n").encode())
             print(f"[SERIAL →] {msg}")
         except Exception as e:
-            print(f"[SERIAL ERROR] {e}")
+            print(f"[SERIAL ERROR] send failed: {e}")
             if error_mgr:
                 error_mgr.raise_error("SERIAL_WRITE_ERROR", {
                     "exception": str(e),
-                    "message": msg,
+                    "message":   msg,
                 })
-            self.ser = None
-            self.available = False
+            self._disconnect()   # mark as disconnected → reconnect loop kicks in
 
-    def read_line(self):
+    def read_line(self) -> str | None:
+        """
+        Read one newline-terminated line.
+        Returns None (instead of raising) when nothing is available or on error.
+        """
         if not self.serial_ok():
             return None
         try:
-            return self.ser.readline().decode(errors="ignore").strip()
-        except:
-            self.ser = None
-            return None
-        
-    def close(self):
-        try:
-            if self.ser:
-                self.ser.close()
-                print("[SERIAL] Closed connection")
+            raw = self.ser.readline()
+            return raw.decode(errors="ignore").strip() or None
         except Exception as e:
-            print(f"[SERIAL] Close error: {e}")
-        finally:
-            self.ser = None     
+            print(f"[SERIAL] read_line error: {e}")
+            self._disconnect()   # mark as disconnected → reconnect loop kicks in
+            return None
+
+    def close(self):
+        """Cleanly shut down: stop the reconnect thread then close the port."""
+        self._stop_reconnect = True
+        self._disconnect()
+        print("[SERIAL] Connection closed")

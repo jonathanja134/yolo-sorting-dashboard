@@ -26,9 +26,9 @@ from Database import (
 
 object_types = [
     "applicator",
-    "ihmulator",
+    "inhaler",
     "chemical",
-    "hazardous"
+    "canister"
 ]
 
 

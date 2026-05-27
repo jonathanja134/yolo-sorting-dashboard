@@ -1,5 +1,5 @@
 """
-yolo_reader.py – YOLO inference + adaptive majority-vote buffer
+yolo_detect_ncnn_headless.py – YOLO inference + adaptive majority-vote buffer
                   + serial protocol (Pi ↔ Arduino) + SocketIO → Flask
                   + WebSocket MJPEG stream  [headless – no local cv2 display]
 
@@ -18,8 +18,6 @@ Serial protocol (Arduino → Pi):
   SERVO:X:OPEN / CLOSED_OK / CLOSED_TIMEOUT / OBJECT_DETECTED / BLOCKED
   ERR:<detail>
   INFO:<detail>
-  STATUS:MOTOR:...|SENSOR1:...|SENSOR2:...|SERVO1:..|SERVO2:..|SERVO3:..|SERVO4:..
-  CHANGE:<what changed>
   ---------------------   (separator lines – ignored)
 
 STREAM LAG FIXES (v2):
@@ -53,26 +51,24 @@ bin_file   = os.path.join(model_dir, "model.ncnn.bin")
 
 error_mgr = get_error_manager()
 
-# ── Serial (Pi ↔ Arduino) — before SocketIO so conveyor commands can send ─────
+# ── Serial (Pi ↔ Arduino) —─────—─────—─────—─────—─────—─────—─────—─────—────
 serial = SerialManager(baud=BAUD)
 print("|0| Serial Manager created")
 
 # ── Conveyor motor states (3 separate conveyors) ─────────────────────────────
-
+# threading lock ensures that only one system at the time can edit the variable
 # Conveyor 1: Pin 10
 motor_1_running = False
 motor_1_lock    = threading.Lock()
-
 # Conveyor 2: Pin 9
 motor_2_running = False
 motor_2_lock    = threading.Lock()
-
 # Conveyor 3: Pin 8
 motor_3_running = False
 motor_3_lock    = threading.Lock()
 
 def _get_multi_conveyor_states():
-    """Return {conveyor_1: bool, conveyor_2: bool, conveyor_3: bool}"""
+    "Return {conveyor_1: bool, conveyor_2: bool, conveyor_3: bool}"
     with motor_1_lock, motor_2_lock, motor_3_lock:
         return {
             "conveyor_1": motor_1_running,
@@ -81,7 +77,7 @@ def _get_multi_conveyor_states():
         }
 
 def _set_multi_conveyor_state(conv_id, running):
-    """Set state for a specific conveyor by ID"""
+    "Set state for a specific conveyor by ID"
     global motor_1_running, motor_2_running, motor_3_running
     if conv_id == "conveyor_1":
         with motor_1_lock:
@@ -93,25 +89,14 @@ def _set_multi_conveyor_state(conv_id, running):
         with motor_3_lock:
             motor_3_running = running
 
-# Legacy single-conveyor accessors (conveyor_1 only) for backward compatibility
-def _get_motor_running():
-    with motor_1_lock:
-        return motor_1_running
-
-def _set_motor_running(running):
-    global motor_1_running
-    with motor_1_lock:
-        motor_1_running = running
-
 # ── SocketIO → dashboard (before model load so startup errors are delivered) ───
 socket_mgr = SocketManager(
     server_url="http://localhost:5000",
-    get_motor_running_fn=_get_motor_running,
-    set_motor_running_fn=_set_motor_running,
     get_multi_conveyor_fn=_get_multi_conveyor_states,
     set_multi_conveyor_fn=_set_multi_conveyor_state,
     serial_send_fn=serial.send,
     emit_fn=_async_emit,
+    serial_ok_fn=serial.serial_ok,
 )
 _async_emit = socket_mgr.async_emit
 socket_mgr.start()
@@ -197,15 +182,14 @@ threading.Thread(
         "serial_manager": serial,
         "emit_fn": _async_emit,
         "buffer_manager": buf_mgr,
-        "motor_state_setter": _set_motor_running,
         "servo_index_to_category": SERVO_INDEX_TO_CATEGORY,
         "set_active_servo": _set_active_servo,
         "multi_motor_state_setter": _set_multi_conveyor_state,
     },
     daemon=True,
 ).start()
-
 # ── NMS ───────────────────────────────────────────────────────────────────────
+# Prevent from multiple detection and ovelap by taking the highest detection by Score
 def nms(boxes, scores, threshold):
     if len(boxes) == 0:
         return []
@@ -231,21 +215,24 @@ def nms(boxes, scores, threshold):
     return keep
 
 # ── Encoder thread (WebSocket) ────────────────────────────────────────────────
-# FIX: added encoded_seq to track new frames and avoid re-sending stale data
+
 encoder_running = True
 latest_frame = None
 frame_lock   = threading.Lock()
 encoded_buf  = None
-encoded_seq  = 0          # ← incremented each time a new JPEG is ready
+encoded_seq  = 0          # incremented each time a new JPEG is ready
 encoded_lock = threading.Lock()
 encode_event = threading.Event()
 
 # FIX: stream resolution and quality tuned down to reduce payload size
 STREAM_WIDTH   = 480
 STREAM_HEIGHT  = 480
-STREAM_QUALITY = 35       # JPEG quality 0-100 (was implicit 50)
+STREAM_QUALITY = 35       # JPEG quality implicitto 50 but reduced  for speed
 
 def encoder_thread_fn():
+    """Runs in a background thread. Waits for a signal 
+    (encode_event) that a new frame is ready, then resizes 
+    it and compresses it at a quality 35"""
     global encoded_buf, encoded_seq
     while encoder_running:
         encode_event.wait(timeout=0.1)
@@ -308,15 +295,15 @@ def draw_servo_overlay(frame):
         return
 
     # ── overlay drawing removed (headless) ──────────────────────────────────
-    # color = SERVO_COLOR.get(cat, (200, 200, 200))
-    # label = SERVO_LABEL.get(cat, cat.capitalize())
-    # h, w  = frame.shape[:2]
-    # overlay = frame.copy()
-    # cv2.rectangle(overlay, (0, h - 50), (w, h), color, -1)
-    # cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-    # cv2.putText(frame, f"ACTIVE: {label}",
-    #             (12, h - 16),
-    #             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    #color = SERVO_COLOR.get(cat, (200, 200, 200))
+    #label = SERVO_LABEL.get(cat, cat.capitalize())
+    #h, w  = frame.shape[:2]
+    #overlay = frame.copy()
+    #cv2.rectangle(overlay, (0, h - 50), (w, h), color, -1)
+    #cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
+    #cv2.putText(frame, f"ACTIVE: {label}",
+    #            (12, h - 16),
+    #            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
 
 # ── Non-blocking stdin keyboard reader ───────────────────────────────────────
 def _read_key():
@@ -402,12 +389,12 @@ try:
         for d in detections:
             x1, y1, x2, y2, conf, cid = d
             cid = int(cid)
-            # color = bbox_colors[cid % len(bbox_colors)]
+            color = bbox_colors[cid % len(bbox_colors)]
             cat   = LABEL_TO_CATEGORY.get(cid, "?").lower()
             lbl   = f"{labels[cid]} [{cat}] {int(conf*100)}%"
-            # cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            # cv2.putText(frame, lbl, (x1, max(y1-5, 10)),
-            #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, lbl, (x1, max(y1-5, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         # ── Buffer overlay (commented out – snapshot logic unchanged) ─────────
         collecting, votes_snap, gap_snap = buf_mgr.snapshot()
@@ -418,8 +405,8 @@ try:
             for cat, n in c_snap.most_common():
                 y_off += 22
                 pct = int(n/total*100) if total else 0
-                # cv2.putText(frame, f"  {cat}: {n} ({pct}%)",
-                #             (10, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,255,200), 1)
+                cv2.putText(frame, f"  {cat}: {n} ({pct}%)",
+                             (10, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,255,200), 1)
 
         # ── Active servo banner (logic runs, drawing commented out) ───────────
         draw_servo_overlay(frame)

@@ -208,7 +208,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .conveyor-status-btn.disconnected { background: #e5e7eb; box-shadow: 0 0 0 3px rgba(107,114,128,0.15); }
 
 /* ── SORTING RATE ── */
-.rate-card { text-align: center; padding: 1.25rem; }
+.rate-card { text-align: center; padding: 1.25rem; margin-bottom: 1.25rem; }
 .rate-card .card-title { margin-bottom: 0.5rem; }
 .rate-value { font-size: 3rem; font-weight: 700; color: var(--text-primary); line-height: 1; font-family: 'DM Mono', monospace; letter-spacing: -0.03em; }
 .rate-unit  { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.3rem; font-weight: 500; }
@@ -235,16 +235,6 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .servo-item.active-chemical   { border-color: var(--c-chemical);   background: #e0f2fe; }
 .servo-item.active-canister   { border-color: var(--c-canister);   background: #fffbeb; }
 
-/* Pending servo state */
-.servo-item.pending {
-  opacity: 0.55;
-}
-.servo-item.pending .servo-name::after {
-  content: ' — pending model support';
-  font-size: 0.62rem;
-  color: var(--text-light);
-  font-weight: 400;
-}
 
 .servo-icon-wrap { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .servo-icon-wrap.active   { background: #dbeafe; }
@@ -271,14 +261,6 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .count-card.pending {
   opacity: 0.5;
   pointer-events: none;
-}
-.count-card.pending .card-title::after {
-  content: ' (pending)';
-  font-size: 0.6rem;
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 400;
-  color: var(--text-light);
 }
 
 /* ── UNRECOGNIZED ALERT ── */
@@ -497,45 +479,92 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   font-size: 0.66rem;
 }
 /* ── Log filter bar ─────────────────────────────── */
-    .log-filter-bar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-      margin-bottom: 8px;
-    }
-    .log-filter-btn {
-      font-size: 0.62rem;
-      font-family: 'DM Mono', monospace;
-      padding: 3px 9px;
-      border-radius: 6px;
-      border: 1px solid var(--border, #2e3650);
-      background: transparent;
-      color: var(--text-secondary, #9aa3b8);
-      cursor: pointer;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      transition: background 0.15s, color 0.15s;
-    }
-    .log-filter-btn:hover {
-      background: rgba(255,255,255,0.06);
-      color: #fff;
-    }
-    .log-filter-btn.active {
-      color: #fff;
-      border-color: transparent;
-    }
-    .log-filter-btn[data-filter="all"].active    { background: #374151; }
-    .log-filter-btn[data-filter="detection"].active { background: #16a34a; }
-    .log-filter-btn[data-filter="servo"].active  { background: #2563eb; }
-    .log-filter-btn[data-filter="sensor"].active { background: #9333ea; }
-    .log-filter-btn[data-filter="conveyor"].active { background: #0891b2; }
-    .log-filter-btn[data-filter="error"].active  { background: #dc2626; }
+.log-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.log-filter-btn {
+  font-size: 0.62rem;
+  font-family: 'DM Mono', monospace;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #2e3650);
+  background: transparent;
+  color: var(--text-secondary, #9aa3b8);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, color 0.15s;
+}
+.log-filter-btn:hover {
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+}
+.log-filter-btn.active {
+  color: #fff;
+  border-color: transparent;
+}
+.log-filter-btn[data-filter="all"].active    { background: #374151; }
+.log-filter-btn[data-filter="detection"].active { background: #16a34a; }
+.log-filter-btn[data-filter="servo"].active  { background: #2563eb; }
+.log-filter-btn[data-filter="sensor"].active { background: #9333ea; }
+.log-filter-btn[data-filter="conveyor"].active { background: #0891b2; }
+.log-filter-btn[data-filter="error"].active  { background: #dc2626; }
+/* ── Log row category colours ──────────────────── */
+.log-row-detection td:nth-child(2) { color: #4ade80; }
+.log-row-servo      td:nth-child(2) { color: #60a5fa; }
+.log-row-sensor     td:nth-child(2) { color: #c084fc; }
+.log-row-conveyor   td:nth-child(2) { color: #22d3ee; }
+.log-row-error      td:nth-child(2) { color: #f87171; font-weight: 600; }
+/* --   STATUS LAMPS BAR -- */
+.lamps-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4rem;
+  padding: 0.85rem 1.25rem;
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border, #2a2d3a);
+  border-radius: 12px;
+  margin-bottom: 1.25rem;
+}
 
-    /* ── Log row category colours ──────────────────── */
-    .log-row-detection td:nth-child(2) { color: #4ade80; }
-    .log-row-servo      td:nth-child(2) { color: #60a5fa; }
-    .log-row-sensor     td:nth-child(2) { color: #c084fc; }
-    .log-row-conveyor   td:nth-child(2) { color: #22d3ee; }
-    .log-row-error      td:nth-child(2) { color: #f87171; font-weight: 600; }
+.lamp-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+}
 
-    .log-row-hidden { display: none; }
+.lamp-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #6b7280);
+}
+
+.lamp {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--lamp-color, #2a2d3a);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Off — flat dark circle */
+.lamp.off {
+  background: #1e2130;
+  box-shadow: none;
+}
+
+/* On — colour + subtle ring */
+.lamp.on { background: var(--lamp-color); box-shadow: 0 0 0 6px rgba(0,0,0,0.06); }
+
+#lamp-red   { --lamp-color: #ef4444; }
+#lamp-orange{ --lamp-color: #f97316; }
+#lamp-green { --lamp-color: #22c55e; }
+#lamp-blue  { --lamp-color: #3b82f6; }

@@ -34,6 +34,18 @@ class ErrorSource(Enum):
 # Error Catalog
 # ══════════════════════════════════════════════════════════════════════════════
 
+"""
+SERIAL_NOT_CONNECTED            |  SERIAL_PORT_NOT_FOUND | SERIAL_CONNECT_FAILED
+SERIAL_READ_ERROR               |  SERIAL_WRITE_ERROR    | SERIAL_PARSE_ERROR
+SERIAL_UNRECOGNIZED_LINE        |  MOTOR_FAULT           | SERVO_NOT_WIRED 
+SERVO_FAULT                     |  SERVO_TIMEOUT         | SERVO_BLOCKED   
+SERVO_INVALID_INDEXSENSOR_FAULT |  ARDUINO_ERR           | ARDUINO_INFO
+MODEL_LOAD_FAILED               |  LOW_CONFIDENCE        | UNRECOGNIZED_OBJECT
+DATABASE_CONNECTION_FAILED      |  SOCKET_DISCONNECTED   | CONFIGURATION_ERROR
+CONTROL_CONVEYOR_BLOCKED        |  UNKNOWN_ERROR
+"""
+
+
 ERROR_CATALOG = {
     # ─── SERIAL / CONNECTION ────────────────────────────────────────────────────
     "SERIAL_NOT_CONNECTED": {
@@ -100,6 +112,14 @@ ERROR_CATALOG = {
         "title": "Motor Fault",
         "message": "Conveyor motor encountered a fault.",
         "action": "Check motor connections and power supply.",
+    },
+    "SERVO_NOT_WIRED": {
+        "code": "SERVO_005",
+        "severity": ErrorSeverity.ERROR,
+        "source": ErrorSource.SERVO,
+        "title": "Servo Not Wired",
+        "message": "Servo is not physically connected or wiring check failed.",
+        "action": "Check servo wiring and PCA9685 channel assignment.",
     },
     "SERVO_FAULT": {
         "code": "SERVO_003",
@@ -177,7 +197,7 @@ ERROR_CATALOG = {
     },
     "UNRECOGNIZED_OBJECT": {
         "code": "BUFFER_002",
-        "severity": ErrorSeverity.WARNING,
+        "severity": ErrorSeverity.INFO,
         "source": ErrorSource.BUFFER,
         "title": "Unrecognized Object",
         "message": "Object could not be classified.",
@@ -217,6 +237,22 @@ ERROR_CATALOG = {
         "message": "Cannot control conveyor: Arduino is disconnected.",
         "action": "Reconnect Arduino before starting or stopping conveyors.",
     },
+    "ESTOP_ACTIVE": {
+    "code": "SYSTEM_004",
+    "severity": ErrorSeverity.CRITICAL,
+    "source": ErrorSource.SYSTEM,
+    "title": "Emergency Stop Active",
+    "message": "E-stop triggered — motor and all servos Stopped immediately.",
+    "action": "Clear the E-stop signal to resume. System must be restarted manually.",
+    },
+    "ESTOP_CLEARED": {
+        "code": "SYSTEM_005",
+        "severity": ErrorSeverity.CRITICAL,
+        "source": ErrorSource.SYSTEM,
+        "title": "Emergency Stop Cleared",
+        "message": "E-stop signal restored. System is ready to restart.",
+        "action": "Press Start or send MOTOR:FORWARD to resume.",
+    },
     "UNKNOWN_ERROR": {
         "code": "SYSTEM_999",
         "severity": ErrorSeverity.ERROR,
@@ -224,7 +260,7 @@ ERROR_CATALOG = {
         "title": "Unknown Error",
         "message": "An unexpected error occurred.",
         "action": "Check logs for more details.",
-    },
+    },  
 }
 
 

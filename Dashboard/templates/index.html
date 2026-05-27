@@ -14,9 +14,6 @@
 <!-- HEADER -->
 <header>
   <div class="header-left">
-    <div class="logo-icon">
-      <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-    </div>
     <h1>Sorting Control Dashboard</h1>
   </div>
   <div class="header-right">
@@ -39,6 +36,25 @@
 <div class="dashboard-main">
 <div class="dashboard">
 
+<!-- ── STATUS LAMPS BAR ── -->
+<div class="lamps-bar">
+  <div class="lamp-cell">
+    <div class="lamp" id="lamp-red"></div>
+    <span class="lamp-label">E-STOP</span>
+  </div>
+  <div class="lamp-cell">
+    <div class="lamp" id="lamp-orange"></div>
+    <span class="lamp-label">PAUSE</span>
+  </div>
+  <div class="lamp-cell">
+    <div class="lamp" id="lamp-green"></div>
+    <span class="lamp-label">RUNNING</span>
+  </div>
+  <div class="lamp-cell">
+    <div class="lamp" id="lamp-blue"></div>
+    <span class="lamp-label">UV Light</span>
+  </div>
+</div>
   <!-- ── ROW 1: Pie | Video ── -->
   <div class="top-row">
 
@@ -147,42 +163,43 @@
   <div class="middle-row">
 
     <div class="card conveyor-card">
-      <div class="card-title">Conveyors</div>
-      <div class="conveyor-list">
-        <div class="conveyor-item" id="conveyor-1-item">
-          <button class="conveyor-status-btn running" id="conveyor-1-led">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round">
-              <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
-            </svg>
-          </button>
-          <div class="conveyor-info">
-            <div class="conveyor-name">Conveyor 1</div>
-            <div class="conveyor-state-text" id="conveyor-1-text">Running</div>
-            <div class="conveyor-speed" id="conveyor-1-speed">1.4 m/s</div>
-          </div>
-          <button class="conveyor-action-btn stop-btn" id="conveyor-1-btn" onclick="toggleConveyor(1)">Stop</button>
-        </div>
-        <div class="conveyor-item" id="conveyor-2-item">
-          <button class="conveyor-status-btn running" id="conveyor-2-led">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round">
-              <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
-            </svg>
-          </button>
-          <div class="conveyor-info">
-            <div class="conveyor-name">Conveyor 2</div>
-            <div class="conveyor-state-text" id="conveyor-2-text">Running</div>
-            <div class="conveyor-speed" id="conveyor-2-speed">1.2 m/s</div>
-          </div>
-          <button class="conveyor-action-btn stop-btn" id="conveyor-2-btn" onclick="toggleConveyor(2)">Stop</button>
-        </div>
-      </div>
-    </div>
+  <div class="card-title">Conveyors</div>
 
-    <div class="card rate-card">
+  <!-- Single control button for both conveyors -->
+  <button class="conveyor-action-btn start-btn" id="conveyor-main-btn" onclick="toggleConveyor(1)" style="width:100%; margin-bottom:0.85rem;">
+    Start
+  </button>
+<div class="card rate-card">
       <div class="card-title">Sorting Rate</div>
       <div class="rate-value" id="sorting-rate">0</div>
       <div class="rate-unit">Device / min</div>
     </div>
+  <div class="conveyor-list">
+    <div class="conveyor-item" id="conveyor-1-item">
+      <button class="conveyor-status-btn stopped" id="conveyor-1-led">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
+        </svg>
+      </button>
+      
+      <div class="conveyor-info">
+        <div class="conveyor-name">Conveyor 1</div>
+        <div class="conveyor-state-text" id="conveyor-1-text">Stopped</div>
+      </div>
+    </div>
+    <div class="conveyor-item" id="conveyor-2-item">
+      <button class="conveyor-status-btn stopped" id="conveyor-2-led">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
+        </svg>
+      </button>
+      <div class="conveyor-info">
+        <div class="conveyor-name">Conveyor 2</div>
+        <div class="conveyor-state-text" id="conveyor-2-text">Stopped</div>
+      </div>
+    </div>
+  </div>
+</div>
 
     <!-- Servos: canister | chemical | applicator | inhaler -->
     <div class="card servo-card">
@@ -199,7 +216,7 @@
           </div>
           <div class="servo-info">
             <div class="servo-name">Servo 1 — Canister</div>
-            <div class="servo-type-tag">CHANNEL 01 · PIN 13</div>
+            <div class="servo-type-tag">CHANNEL 01 · PIN 12</div>
           </div>
           <span class="servo-status inactive" id="servo-status-canister">Closed</span>
         </div>
@@ -214,7 +231,7 @@
           </div>
           <div class="servo-info">
             <div class="servo-name">Servo 2 — Chemical</div>
-            <div class="servo-type-tag">CHANNEL 02 · PIN 12</div>
+            <div class="servo-type-tag">CHANNEL 02 · PIN 13</div>
           </div>
           <span class="servo-status inactive" id="servo-status-chemical">Closed</span>
         </div>
@@ -229,7 +246,7 @@
           </div>
           <div class="servo-info">
             <div class="servo-name">Servo 3 — Applicator</div>
-            <div class="servo-type-tag">CHANNEL 03 · PIN 8</div>
+            <div class="servo-type-tag">CHANNEL 03 · PIN 14</div>
           </div>
           <span class="servo-status inactive" id="servo-status-applicator">Closed</span>
         </div>
@@ -244,7 +261,7 @@
           </div>
           <div class="servo-info">
             <div class="servo-name">Servo 4 — Inhaler</div>
-            <div class="servo-type-tag">CHANNEL 04 · PIN 7</div>
+            <div class="servo-type-tag">CHANNEL 04 · PIN 15</div>
           </div>
           <span class="servo-status inactive" id="servo-status-inhaler">Closed</span>
         </div>
@@ -337,194 +354,7 @@
 
 <script src="/static/js/dashboard.js"></script>
 
-<!-- ── Supplementary: log filters + new socket events ─────────────────────── -->
-<script>
-(function () {
-  "use strict";
 
-  // ── Active filter state ───────────────────────────────────────────────────
-  let _activeFilter = "all";
-
-  // ── Wire filter buttons ───────────────────────────────────────────────────
-  document.querySelectorAll(".log-filter-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      document.querySelectorAll(".log-filter-btn").forEach(function (b) {
-        b.classList.remove("active");
-      });
-      btn.classList.add("active");
-      _activeFilter = btn.dataset.filter;
-      _applyFilter();
-    });
-  });
-
-  function _applyFilter() {
-    var rows = document.querySelectorAll("#event-log-body tr[data-category]");
-    rows.forEach(function (row) {
-      if (_activeFilter === "all" || row.dataset.category === _activeFilter) {
-        row.classList.remove("log-row-hidden");
-      } else {
-        row.classList.add("log-row-hidden");
-      }
-    });
-  }
-
-  // ── Patch log row insertion ───────────────────────────────────────────────
-  // Uses a MutationObserver so this works regardless of how dashboard.js
-  // inserts rows — no need to touch that file.
-  var tbody = document.getElementById("event-log-body");
-
-  var observer = new MutationObserver(function (mutations) {
-    mutations.forEach(function (mut) {
-      mut.addedNodes.forEach(function (node) {
-        if (node.nodeType !== 1 || node.tagName !== "TR") return;
-
-        // Infer category from the second cell (Cat. column)
-        var catCell = node.cells && node.cells[1];
-        if (!catCell) return;
-        var text = catCell.textContent.trim().toLowerCase();
-
-        // Map display text → filter key
-        var cat = "other";
-        if (text.includes("detect") || text.includes("yolo") || text.includes("label")) {
-          cat = "detection";
-        } else if (text.includes("servo")) {
-          cat = "servo";
-        } else if (text.includes("sensor")) {
-          cat = "sensor";
-        } else if (text.includes("conveyor") || text.includes("motor")) {
-          cat = "conveyor";
-        } else if (text.includes("error") || text.includes("err") || text.includes("blocked")) {
-          cat = "error";
-        }
-
-        node.dataset.category = cat;
-        node.classList.add("log-row-" + cat);
-
-        // Apply current filter immediately
-        if (_activeFilter !== "all" && cat !== _activeFilter) {
-          node.classList.add("log-row-hidden");
-        }
-
-        // Remove "no events" placeholder if present
-        var empty = tbody.querySelector(".log-empty");
-        if (empty) empty.parentElement.remove();
-      });
-    });
-  });
-
-  if (tbody) {
-    observer.observe(tbody, { childList: true });
-  }
-
-  // ── Helper: inject a log row directly from this script ───────────────────
-  // Used for events that dashboard.js doesn't know about (errors, status, etc.)
-  function injectLogRow(category, catLabel, action, isError) {
-    var now = new Date();
-    var time = now.toTimeString().slice(0, 8);
-
-    var tr = document.createElement("tr");
-    tr.dataset.category = category;
-    tr.classList.add("log-row-" + category);
-    if (_activeFilter !== "all" && category !== _activeFilter) {
-      tr.classList.add("log-row-hidden");
-    }
-
-    var tdTime   = document.createElement("td");
-    var tdCat    = document.createElement("td");
-    var tdAction = document.createElement("td");
-
-    tdTime.textContent   = time;
-    tdCat.textContent    = catLabel;
-    tdAction.textContent = action;
-
-    if (isError) {
-      tdAction.style.color = "#f87171";
-    }
-
-    tr.appendChild(tdTime);
-    tr.appendChild(tdCat);
-    tr.appendChild(tdAction);
-
-    // Prepend so newest is on top
-    var firstRow = tbody.firstChild;
-    if (firstRow) {
-      tbody.insertBefore(tr, firstRow);
-    } else {
-      tbody.appendChild(tr);
-    }
-
-    var empty = tbody.querySelector(".log-empty");
-    if (empty) empty.parentElement.remove();
-
-    // Keep log bounded at 200 rows
-    var rows = tbody.querySelectorAll("tr[data-category]");
-    if (rows.length > 200) {
-      rows[rows.length - 1].remove();
-    }
-  }
-
-  function getSocket() {
-    return window.socket || (window._logSocket = window._logSocket || io());
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
-    var socket = getSocket();
-
-    socket.on("system_error", function (data) {
-      var msg = (data.title && data.message)
-        ? data.title + ": " + data.message
-        : (data.error || data.message || "System error");
-      injectLogRow("error", data.severity === "info" ? "Info" : "Error", msg, data.severity !== "info");
-    });
-
-    socket.on("system_log", function (data) {
-      var msg = (data.title && data.message)
-        ? data.title + ": " + data.message
-        : (data.message || "Info");
-      injectLogRow("error", "Info", msg, false);
-    });
-
-    socket.on("update_servo", function (data) {
-      if (data.active === false && data.close_status) {
-        var status = data.close_status === "closed_ok" ? "OK" : "TIMEOUT";
-        injectLogRow("servo", "Servo",
-          "Servo " + data.index + " (" + (data.type || data.label) + ") closed [" + status + "]",
-          false);
-      }
-    });
-
-    // ── Status snapshot → log (concise one-liner) ────────────────────────
-    socket.on("status_snapshot", function (data) {
-      // Build a short summary string
-      var parts = [];
-      if (data.MOTOR)   parts.push("Motor:" + data.MOTOR);
-      if (data.SENSOR1) parts.push("S1:"   + data.SENSOR1);
-      if (data.SENSOR2) parts.push("S2:"   + data.SENSOR2);
-      ["SERVO1","SERVO2","SERVO3","SERVO4"].forEach(function (k) {
-        if (data[k]) parts.push(k + ":" + data[k]);
-      });
-      injectLogRow("sensor", "Status", parts.join(" | "), false);
-    });
-
-    // ── Servo blocked ─────────────────────────────────────────────────────
-    socket.on("servo_object_detected", function (data) {
-      injectLogRow("servo", "Servo",
-        "Servo " + data.index + " (" + data.type + ") object detected", false);
-    });
-
-    // ── Change events (CHANGE: lines, for visibility) ─────────────────────
-    // These are already captured in the STATUS snapshot log entry above,
-    // so we only log them if debug panel is visible.
-    socket.on("change_event", function (data) {
-      var dbg = document.getElementById("debug-panel");
-      if (dbg && dbg.style.display !== "none") {
-        injectLogRow("sensor", "Change", data.change || "", false);
-      }
-    });
-  });
-
-})();
-</script>
 
 <!-- WebSocket video stream -->
 <script>
