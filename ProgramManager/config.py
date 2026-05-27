@@ -86,3 +86,20 @@ CONVEYOR_PINS = {
     "conveyor_2": 9,   # Conveyor 2 on Pin 9
     "conveyor_3": 8,   # Conveyor 3 on Pin 8
 }
+
+
+def normalize_conveyor_db_id(raw, default=1):
+    """Numeric id for DB / dashboard DOM (1, 2, 3). Accepts 1, '1', 'conveyor_1'."""
+    if raw is None:
+        return default
+    if isinstance(raw, int):
+        return raw
+    s = str(raw).strip().lower()
+    if s.startswith("conveyor_"):
+        return int(s.split("_", 1)[1])
+    return int(s)
+
+
+def conveyor_socket_id(db_id):
+    """String id for Pi motor state (conveyor_1, …)."""
+    return f"conveyor_{int(db_id)}"

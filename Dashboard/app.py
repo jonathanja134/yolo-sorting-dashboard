@@ -38,6 +38,7 @@ TO   frontend  →  update_conveyor | update_servo | update_sensor
 
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
+from ProgramManager.config import normalize_conveyor_db_id
 from Dashboard.Database import (
     init_db,
     get_conveyors, save_conveyor,
@@ -90,6 +91,14 @@ arduino_connected = False
 arduino_port = None
 arduino_connection_lock = None  # Will be initialized when needed
 
+# Lamp states for status bar (red, orange, green, blue)
+lamp_state = {
+    "red": False,
+    "orange": False,
+    "green": False,
+    "blue": False,
+}
+
 # Last relayed banner errors (for browser refresh sync)
 _active_banner_errors = {}
 
@@ -117,6 +126,21 @@ def _emit_counts():
         "unrecognized": get_unrecognized(),
         "rate":         compute_sorting_rate(),
     })
+
+
+@socketio.on("lamp_update")
+def handle_lamp_update(data):
+    """Receive lamp updates from Pi and broadcast to browsers."""
+    global lamp_state
+    try:
+        # Accept partial updates or full dict
+        for k, v in dict(data).items():
+            if k in lamp_state:
+                lamp_state[k] = bool(v)
+    except Exception:
+        pass
+    print(f"[DASHBOARD] lamp_update -> {lamp_state}")
+    socketio.emit("lamp_update", lamp_state)
 
 
 def _clear_servo_display():
@@ -158,6 +182,7 @@ def api_state():
             "connected": arduino_connected,
             "port": arduino_port,
         },
+        "lamps":            lamp_state,
         "warning":       _current_warning(),
         "active_errors": list(_active_banner_errors.values()),
         "rate":          compute_sorting_rate(),
@@ -174,33 +199,39 @@ def test_latency(data):
 
 @socketio.on("control_conveyor")
 def handle_conveyor_control(data):
-    conv_id = data.get("id")
+    conv_id = normalize_conveyor_db_id(data.get("id"))
     running = data.get("command") == "start"
-    
+
     if not is_arduino_connected():
         _err_mgr().raise_error("CONTROL_CONVEYOR_BLOCKED", {
             "conveyor_id": conv_id,
         })
         return
-    
+
     conveyors = get_conveyors()
-    speed = conveyors[conv_id]["speed"] if running else 0.0
-    save_conveyor(conv_id, running, speed)
     log_event("conveyor",
-              f"Conveyor {conv_id} {'started' if running else 'stopped'}",
-              f"speed={speed}")
-    socketio.emit("update_conveyor", {
-        "id":      conv_id,
-        "running": running,
-        "speed":   speed,
-    })
+              f"Conveyor system {'started' if running else 'stopped'}",
+              f"triggered_by={conv_id}")
+    # One physical motor — keep dashboard conveyors 1 & 2 aligned in DB and UI
+    for cid in (1, 2):
+        speed = conveyors[cid]["speed"] if running else 0.0
+        save_conveyor(cid, running, speed)
+        socketio.emit("update_conveyor", {
+            "id":          cid,
+            "running":     running,
+            "speed":       speed,
+            "force_motor": cid == conv_id,
+        })
 
 
 # ── Conveyor state relay  (Pi ACK → server → browser) ────────────────────────
 
 @socketio.on("conveyor_state")
 def handle_conveyor_state(data):
-    conv_id = data.get("id", "conveyor_1")
+    global arduino_connected
+    arduino_connected = True
+
+    conv_id = normalize_conveyor_db_id(data.get("id", "conveyor_1"))
     running = bool(data.get("running", False))
     conveyors = get_conveyors()
     speed = conveyors.get(conv_id, {}).get("speed", 0.0) if running else 0.0
@@ -305,12 +336,15 @@ def handle_arduino_connection(data):
 
     if not arduino_connected:
         _clear_servo_display()
-    
+    else:
+        _err_mgr().resolve_error("CONTROL_CONVEYOR_BLOCKED")
+
     socketio.emit("arduino_status", {
         "connected": arduino_connected,
         "port": arduino_port,
         "timestamp": timestamp,
         "warning": _current_warning(),
+        "conveyors": list(get_conveyors().values()),  # ← add real state
     })
 
 
@@ -380,13 +414,11 @@ def handle_yolo_detection(data):
                   f"Detected '{label.capitalize()}'",
                   f"category={label} confidence={confidence:.0%} frames={total_frames}")
     else:
-        label     = "unrecognized"
-        new_total = increment_unrecognized()
-        _err_mgr().raise_error("UNRECOGNIZED_OBJECT", {
-            "message": f"Unrecognized object: {display} (total: {new_total})",
-            "display": display,
-            "total":   new_total,
-        })
+        label = "unrecognized"
+        increment_unrecognized()
+        log_event("detection",
+                  f"Detected '{label}'",
+                  f"confidence={confidence:.0%} frames={total_frames}")
 
     socketio.emit("new_detection", {
         "label":        display,
@@ -427,6 +459,15 @@ def handle_error_resolved(data):
     key = data.get("error_key") or data.get("code")
     _active_banner_errors.pop(key, None)
     socketio.emit("error_resolved", data)
+    # After resolving an error, emit current arduino status/warning so clients
+    # refresh the banner if no active errors remain.
+    socketio.emit("arduino_status", {
+        "connected": arduino_connected,
+        "port": arduino_port,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "warning": _current_warning(),
+        "conveyors": list(get_conveyors().values()),
+    })
 
 
 @socketio.on("connect")
@@ -440,7 +481,10 @@ def on_connect():
         "connected": arduino_connected,
         "port":      arduino_port,
         "warning":   _current_warning(),
-    })
+    }, to=request.sid)
+
+    # send current lamps state to newly connected client
+    socketio.emit("lamp_update", lamp_state, to=request.sid)
 
     for conv_id, conv in conveyors.items():
         socketio.emit("update_conveyor", {

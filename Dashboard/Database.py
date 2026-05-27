@@ -176,9 +176,7 @@ def increment_unrecognized():
     )
     conn.commit()
     conn.close()
-    val = get_unrecognized()
-    log_event("detection", "Unrecognized object", f"total={val}")
-    return val
+    return get_unrecognized()
 
 def get_session_start():
     conn = sqlite3.connect(DB_PATH)

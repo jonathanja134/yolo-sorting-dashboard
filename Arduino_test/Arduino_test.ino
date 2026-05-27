@@ -2,26 +2,17 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(); // default I2C addr 0x40
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 // ── CONFIG ───────────────────────────────────────────────────
 #define NB_SERVOS 4
 
-// PCA9685 channel numbers (0–15)
-// 1: "canister"
-// 2: "chemical"
-// 3: "applicator"
-// 4: "inhaler"
-
-
-#define S_MOTOR_1  12   // LEFT group
-#define S_MOTOR_2  13   // LEFT group
-#define S_MOTOR_3  14   // RIGHT group (sensor side)
-#define S_MOTOR_4  15   // RIGHT group (sensor side
+#define S_MOTOR_1  12
+#define S_MOTOR_2  13
+#define S_MOTOR_3  14
+#define S_MOTOR_4  15
 
 #define MotorFw 10
-
-#define MotorDw  9
 
 #define POS_SENSOR_1  4
 #define POS_SENSOR_2  2
@@ -31,31 +22,63 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(); // default I2C addr 0x4
 #define PULLDOWN_2   6
 #define PULLDOWN_R  11
 
-// PCA9685 @ 50 Hz → 4096 ticks per 20 ms period
-#define SERVO_MIN 150    // ~1000 µs  (≈ 0°)
-#define SERVO_MAX 600    // ~2000 µs  (≈ 180°)
+// ── START/STOP BUTTON ────────────────────────────────────────
+#define START_STOP_PIN     8
+#define BUTTON_DEBOUNCE_MS 50
 
-// ── SERVO POSITIONS ──────────────────────────────────────────
-#define CLOSED_POS      120   // all servos close to this position
-#define OPEN_POS_LEFT    80   // channels 12, 13 (idx 0, 1) open position
-#define OPEN_POS_RIGHT  160   // channels 14, 15 (idx 2, 3) open position
+// ── E-STOP ───────────────────────────────────────────────────
+#define ESTOP_PIN 12
 
-const unsigned long  SERVO_OPEN_MS  = 500;
-const unsigned long  SENSOR_TIMEOUT = 400;
-const unsigned long  DEBOUNCE_MS    = 50;
+// ── ORANGE LAMP ──────────────────────────────────────────────
+// ON when system stopped + e-stop NOT active
+#define ORANGE_LAMP_PIN 13
 
-const int EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
-const int SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
-const char* CATEGORY_NAMES[NB_SERVOS] = { "canister", "chemical", "applicator", "inhaler" };
+// ── UV BUTTON + UV LAMP ──────────────────────────────────────
+// UV button only works when systemRunning = true
+// UV lamp turns OFF automatically when system stops
+#define UV_BUTTON_PIN  3
+#define UV_LAMP_PIN    9
+// ─────────────────────────────────────────────────────────────
+
+#define SERVO_MIN 150
+#define SERVO_MAX 600
+
+#define CLOSED_POS      120
+#define OPEN_POS_LEFT    80
+#define OPEN_POS_RIGHT  160
+
+#define SERVO_CHECK_MIN_PULSE  100
+#define SERVO_CHECK_MAX_PULSE  650
+
+const unsigned long SERVO_OPEN_MS  = 500;
+const unsigned long SENSOR_TIMEOUT = 400;
+const unsigned long DEBOUNCE_MS    = 50;
+
+const int   EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
+const int   SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
+const char* CATEGORY_NAMES[NB_SERVOS]   = { "canister", "chemical", "applicator", "inhaler" };
 
 const int MotorOnLED = 3;
 int  servoPos[NB_SERVOS];
 int  homePos[NB_SERVOS];
-bool servoOpen[NB_SERVOS] = {};
+bool servoOpen[NB_SERVOS]   = {};
+bool servoWired[NB_SERVOS]  = {};
 bool motorRunning = false;
 bool inActuation  = false;
 
-// ── SENSOR STATE ─────────────────────────────────────────────
+bool systemRunning      = false;
+bool eStopActive        = false;
+bool lastButtonState    = HIGH;
+bool currentButtonState = HIGH;
+unsigned long lastDebounceTime = 0;
+
+// ── UV BUTTON STATE ───────────────────────────────────────────
+bool uvOn                 = false;
+bool lastUVButtonState    = HIGH;
+bool currentUVButtonState = HIGH;
+unsigned long lastUVDebounceTime = 0;
+// ─────────────────────────────────────────────────────────────
+
 struct Sensor {
   int           id;
   int           pin;
@@ -73,30 +96,166 @@ Sensor sensors[2] = {
 // ── HELPERS ──────────────────────────────────────────────────
 uint16_t angleToPulse(int angle) {
   angle = constrain(angle, 0, 180);
-  angle = 180 - angle;   // invert servo direction
+  angle = 180 - angle;
   return map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
 }
 
-// Returns the correct open position for a given servo index
 int getOpenPos(int idx) {
   return (idx < 2) ? OPEN_POS_LEFT : OPEN_POS_RIGHT;
 }
 
-// ── MOVE SERVO via PCA9685 ───────────────────────────────────
 void moveServo(int idx, int angle) {
   angle = constrain(angle, 0, 180);
   pwm.setPWM(SERVO_CHANNELS[idx], 0, angleToPulse(angle));
   servoPos[idx] = angle;
 }
 
-// ── SETUP ────────────────────────────────────────────────────
+// ── ORANGE LAMP ───────────────────────────────────────────────
+void updateOrangeLamp() {
+  digitalWrite(ORANGE_LAMP_PIN, (!systemRunning && !eStopActive) ? HIGH : LOW);
+}
+
+// ── UV BUTTON ────────────────────────────────────────────────
+// Blocked entirely when system is not running.
+// UV lamp is forced OFF when system stops (see stopSystemMotor).
+void readUVButton() {
+  bool reading = digitalRead(UV_BUTTON_PIN);
+
+  if (reading != currentUVButtonState) {
+    lastUVDebounceTime   = millis();
+    currentUVButtonState = reading;
+  }
+
+  if ((millis() - lastUVDebounceTime) > BUTTON_DEBOUNCE_MS) {
+    if (currentUVButtonState == LOW && lastUVButtonState == HIGH) {
+
+      // Only toggle UV if system is running
+      if (systemRunning) {
+        uvOn = !uvOn;
+        digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
+        Serial.println(uvOn ? "ACK:UV:ON" : "ACK:UV:OFF");
+      }
+      // If system not running, button press is silently ignored
+    }
+    lastUVButtonState = currentUVButtonState;
+  }
+}
+
+// ── SERVO WIRING CHECK ───────────────────────────────────────
+bool checkServoWired(int idx) {
+  uint16_t pulse = angleToPulse(CLOSED_POS);
+  if (pulse < SERVO_CHECK_MIN_PULSE || pulse > SERVO_CHECK_MAX_PULSE) {
+    Serial.print("ERR:SERVO:"); Serial.print(idx + 1);
+    Serial.print(":WIRING:PULSE_OUT_OF_RANGE:"); Serial.println(pulse);
+    return false;
+  }
+  pwm.setPWM(SERVO_CHANNELS[idx], 0, pulse);
+  delay(20);
+  uint16_t readOn  = pwm.getPWM(SERVO_CHANNELS[idx], 0);
+  uint16_t readOff = pwm.getPWM(SERVO_CHANNELS[idx], 1);
+  if (readOff < SERVO_CHECK_MIN_PULSE || readOff > SERVO_CHECK_MAX_PULSE) {
+    Serial.print("ERR:SERVO:"); Serial.print(idx + 1);
+    Serial.print(":WIRING:READBACK_FAILED:EXPECTED:");
+    Serial.print(pulse);
+    Serial.print(":GOT:"); Serial.println(readOff);
+    return false;
+  }
+  return true;
+}
+
+// ── E-STOP ───────────────────────────────────────────────────
+void readEStop() {
+  bool safe = digitalRead(ESTOP_PIN);   // HIGH = safe, LOW = E-stop
+  if (!safe && !eStopActive) {
+    // ── Falling edge: E-stop just activated ──────────────────
+    eStopActive   = true;
+    systemRunning = false;
+    motorRunning  = false;
+
+    digitalWrite(MotorFw,    LOW);
+    digitalWrite(MotorOnLED, LOW);
+
+    // Close all servos immediately, even mid-actuation
+    inActuation = false;
+    for (int i = 0; i < NB_SERVOS; i++) {
+      moveServo(i, CLOSED_POS);
+      servoOpen[i] = false;
+    }
+
+    Serial.println("ESTOP:ACTIVE");
+  }
+
+  if (safe && eStopActive) {
+    // ── Rising edge: E-stop cleared ──────────────────────────
+    eStopActive = false;
+    Serial.println("ESTOP:CLEARED");
+    // System stays stopped — operator must press Start or send
+    // MOTOR:FORWARD to resume. This is intentional.
+  }
+}
+
+// ── MOTOR CONTROL ────────────────────────────────────────────
+void startSystemMotor() {
+  if (eStopActive) {
+    Serial.println("ERR:ESTOP:ACTIVE");
+    return;
+  }
+  digitalWrite(MotorFw,    HIGH);
+  digitalWrite(MotorOnLED, HIGH);
+  motorRunning  = true;
+  systemRunning = true;
+  updateOrangeLamp();
+}
+
+void stopSystemMotor(bool closeServos) {
+  digitalWrite(MotorFw,    LOW);
+  digitalWrite(MotorOnLED, LOW);
+  motorRunning  = false;
+  systemRunning = false;
+
+  // Force UV off when system stops — button is also blocked from now on
+  uvOn = false;
+  digitalWrite(UV_LAMP_PIN, LOW);
+  Serial.println("ACK:UV:OFF");
+
+  if (closeServos) {
+    for (int i = 0; i < NB_SERVOS; i++) {
+      moveServo(i, CLOSED_POS);
+      servoOpen[i] = false;
+    }
+  }
+  updateOrangeLamp();
+}
+
+// ── START/STOP BUTTON ────────────────────────────────────────
+void readStartStopButton() {
+  bool reading = digitalRead(START_STOP_PIN);
+
+  if (reading != currentButtonState) {
+    lastDebounceTime   = millis();
+    currentButtonState = reading;
+  }
+
+  if ((millis() - lastDebounceTime) > BUTTON_DEBOUNCE_MS) {
+    if (currentButtonState == LOW && lastButtonState == HIGH) {
+      if (!systemRunning) {
+        startSystemMotor();
+        Serial.println("ACK:SYSTEM:STARTED");
+        
+      } else {
+        stopSystemMotor(false);
+        Serial.println("ACK:SYSTEM:STOPPED");
+      }
+    }
+    lastButtonState = currentButtonState;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-
   pwm.begin();
   pwm.setPWMFreq(50);
   delay(10);
-  Serial.println("PCA9685 OK");
 
   pinMode(PULLDOWN_1, OUTPUT); digitalWrite(PULLDOWN_1, LOW);
   pinMode(PULLDOWN_2, OUTPUT); digitalWrite(PULLDOWN_2, LOW);
@@ -106,29 +265,42 @@ void setup() {
   pinMode(POS_SENSOR_2, INPUT);
   pinMode(RESET_SENSOR, INPUT);
 
-  pinMode(MotorFw, OUTPUT); digitalWrite(MotorFw, LOW);
-  pinMode(MotorDw, OUTPUT); digitalWrite(MotorDw, LOW);
+  pinMode(MotorFw,    OUTPUT); digitalWrite(MotorFw,    LOW);
   pinMode(MotorOnLED, OUTPUT); digitalWrite(MotorOnLED, LOW);
 
+  pinMode(ORANGE_LAMP_PIN, OUTPUT); digitalWrite(ORANGE_LAMP_PIN, HIGH);
+  pinMode(UV_LAMP_PIN,     OUTPUT); digitalWrite(UV_LAMP_PIN,     LOW);
+  pinMode(UV_BUTTON_PIN,   INPUT_PULLUP);
+
+  pinMode(START_STOP_PIN, INPUT_PULLUP);
+  pinMode(ESTOP_PIN,      INPUT_PULLUP);
+
   for (int i = 0; i < NB_SERVOS; i++) {
-    // Ignore stored EEPROM positions — always start at CLOSED_POS
     homePos[i]  = CLOSED_POS;
     servoPos[i] = CLOSED_POS;
     moveServo(i, CLOSED_POS);
-    Serial.print("SERVO:"); Serial.print(i + 1);
-    Serial.print(":INIT:CLOSED:"); Serial.println(CLOSED_POS);
+    servoWired[i] = checkServoWired(i);
+    if (servoWired[i]) {
+      Serial.print("SERVO:"); Serial.print(i + 1);
+      Serial.print(":INIT:CLOSED:"); Serial.println(CLOSED_POS);
+    } else {
+      Serial.print("ERR:SERVO:"); Serial.print(i + 1);
+      Serial.print(":NOT_WIRED:CATEGORY:"); Serial.println(CATEGORY_NAMES[i]);
+    }
   }
 
   Serial.println("=== Sorting System Ready ===");
 }
 
-// ── LOOP ─────────────────────────────────────────────────────
 void loop() {
+  readEStop();
+  readStartStopButton();
+  readUVButton();
+  updateOrangeLamp();
   readSensors();
   readSerial();
 }
 
-// ── SENSOR UPDATE ────────────────────────────────────────────
 void updateSensor(Sensor &s, int servoStart, int servoEnd) {
   unsigned long now     = millis();
   bool          reading = digitalRead(s.pin);
@@ -165,14 +337,12 @@ void readSensors() {
   updateSensor(sensors[1], 2, 4);
 }
 
-// ── SERIAL ───────────────────────────────────────────────────
 void readSerial() {
   if (!Serial.available()) return;
 
   String rawCmd = Serial.readStringUntil('\n');
   rawCmd.replace("\r", "");
   rawCmd.trim();
-
   if (rawCmd.length() == 0) return;
 
   int sep = rawCmd.indexOf(':');
@@ -183,26 +353,19 @@ void readSerial() {
 
   String key = rawCmd.substring(0, sep);
   String arg = rawCmd.substring(sep + 1);
-  key.trim();
-  arg.trim();
+  key.trim(); arg.trim();
   key.toUpperCase();
 
   if (key == "MOTOR") {
     arg.toUpperCase();
     if (arg == "FORWARD") {
-      digitalWrite(MotorFw, HIGH);
-      digitalWrite(MotorOnLED, HIGH);
-      digitalWrite(MotorDw, LOW);
-      motorRunning = true;
-      Serial.println("ACK:MOTOR:FORWARD");
+      startSystemMotor();
+      if (!eStopActive) Serial.println("ACK:MOTOR:FORWARD");
     } else if (arg == "STOP") {
-      digitalWrite(MotorFw, LOW);
-      digitalWrite(MotorOnLED, LOW);
-      digitalWrite(MotorDw, LOW);
-      motorRunning = false;
+      stopSystemMotor(true);
       Serial.println("ACK:MOTOR:STOP");
     } else {
-      Serial.println("ERR:MOTOR:UNKNOWN");
+      Serial.print("ERR:MOTOR:UNKNOWN:"); Serial.println(arg);
     }
     return;
   }
@@ -212,6 +375,9 @@ void readSerial() {
     return;
   }
 
+  if (eStopActive)    { Serial.println("ERR:ESTOP:ACTIVE");           return; }
+  if (!systemRunning) { Serial.println("ERR:SYSTEM:IS_NOT_RUNNING");  return; }
+
   String category = arg;
   category.toLowerCase();
 
@@ -220,8 +386,10 @@ void readSerial() {
     if (category == CATEGORY_NAMES[i]) { idx = i; break; }
   }
 
-  if (idx == -1) {
-    Serial.print("ERR:BAD_CATEGORY:"); Serial.println(category);
+  if (idx == -1) { Serial.print("ERR:BAD_CATEGORY:"); Serial.println(category); return; }
+  if (!servoWired[idx]) {
+    Serial.print("ERR:SERVO:"); Serial.print(idx + 1);
+    Serial.print(":NOT_WIRED:CATEGORY:"); Serial.println(CATEGORY_NAMES[idx]);
     return;
   }
 
@@ -229,7 +397,6 @@ void readSerial() {
   actuateServo(idx);
 }
 
-// ── SERVO ACTION ─────────────────────────────────────────────
 void actuateServo(int idx) {
   inActuation = true;
 

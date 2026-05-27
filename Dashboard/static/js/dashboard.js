@@ -21,7 +21,7 @@ const CAT_COLORS = {
   unrecognized: '#9aa3b8',   // grey
 };
 
-const CAT_PENDING = {};
+
 
 // ── PIE CHART ──
 const pieCtx = document.getElementById('pieChart').getContext('2d');
@@ -52,11 +52,13 @@ const pieChart = new Chart(pieCtx, {
 
 // ── LOCAL STATE ──
 const counts = { canister: 0, chemical: 0, applicator: 0, inhaler: 0 };
-const conveyorState = { 1: 'running', 2: 'running' };
+const conveyorState = { 1: 'stopped', 2: 'stopped' };
+
+function normalizeConveyorId(id) {
+  return parseInt(id, 10) || 1;
+}
 let arduinoConnected = false;
 const activeErrors = {};
-
-const NOMINAL_WARNING = 'No Errors Detected';
 const DISCONNECT_WARNING = '⚠ Arduino disconnected — conveyors are disabled.';
 
 // ── UPDATE COUNTERS ──
@@ -93,43 +95,35 @@ function updateCounts(data) {
   }
 }
 
-// ── CONVEYOR — MANUAL TOGGLE ──
+// ── CONVEYOR — MANUAL TOGGLE (one physical motor → both UI rows stay in sync) ──
+let conveyorTogglePending = false;
+
 function toggleConveyor(id) {
-  const next = conveyorState[id] === 'running' ? 'stopped' : 'running';
-  setConveyorState(id, next, next === 'stopped' ? 0 : null);
-  socket.emit('control_conveyor', { id, command: next === 'running' ? 'start' : 'stop' });
+  const cid = normalizeConveyorId(id);
+  if (conveyorState[cid] === 'disconnected' || conveyorTogglePending) return;
+  const next = conveyorState[cid] === 'running' ? 'stopped' : 'running';
+  conveyorTogglePending = true;
+  socket.emit('control_conveyor', { id: cid, command: next === 'running' ? 'start' : 'stop' });
+  setTimeout(() => { conveyorTogglePending = false; }, 3000);
 }
 
-function setConveyorState(id, state, speed) {
-  conveyorState[id] = state;
-  const led     = document.getElementById(`conveyor-${id}-led`);
-  const txt     = document.getElementById(`conveyor-${id}-text`);
-  const btn     = document.getElementById(`conveyor-${id}-btn`);
-  const speedEl = document.getElementById(`conveyor-${id}-speed`);
+function setConveyorState(id, state) {
+  const cid = normalizeConveyorId(id);
+  const led = document.getElementById(`conveyor-${cid}-led`);
+  if (!led) return;
+  conveyorState[cid] = state;
+  const txt = document.getElementById(`conveyor-${cid}-text`);
+  const btn = document.getElementById('conveyor-main-btn');
   const strokeColor = { running: '#22c55e', stopped: '#ef4444', warning: '#f97316' };
   led.className = `conveyor-status-btn ${state}`;
   led.querySelector('svg').setAttribute('stroke', strokeColor[state] || '#9aa3b8');
-  if (state === 'running') {
-    txt.textContent = 'Running';
-    btn.className   = 'conveyor-action-btn stop-btn';
-    btn.textContent = 'Stop';
-  } else if (state === 'stopped') {
-    txt.textContent = 'Stopped';
-    btn.className   = 'conveyor-action-btn start-btn';
-    btn.textContent = 'Start';
-    if (speedEl) speedEl.textContent = '0.0 m/s';
-  } else {
-    txt.textContent = 'Warning — Check system';
-    btn.className   = 'conveyor-action-btn stop-btn';
-    btn.textContent = 'Stop';
-  }
+
   if (state === 'disconnected') {
     txt.textContent = 'Disconnected';
     btn.className   = 'conveyor-action-btn disabled-btn';
     btn.textContent = 'Unavailable';
     btn.disabled    = true;
-    if (speedEl) speedEl.textContent = '—';
-    led.className = 'conveyor-status-btn disconnected';
+    led.className   = 'conveyor-status-btn disconnected';
     led.querySelector('svg').setAttribute('stroke', '#6b7280');
   } else {
     btn.disabled = false;
@@ -141,17 +135,15 @@ function setConveyorState(id, state, speed) {
       txt.textContent = 'Stopped';
       btn.className   = 'conveyor-action-btn start-btn';
       btn.textContent = 'Start';
-      if (speedEl) speedEl.textContent = '0.0 m/s';
+    } else {
+      txt.textContent = 'Warning — Check system';
+      btn.className   = 'conveyor-action-btn stop-btn';
+      btn.textContent = 'Stop';
     }
-  }
-  if (speedEl && speed !== null && speed !== undefined && state !== 'stopped' && state !== 'disconnected') {
-    speedEl.textContent = `${speed} m/s`;
   }
 }
 
 // ── SERVO ──
-// Only reflects Arduino-driven activation when the board is connected.
-const _servoTimers = {};
 
 function setServoState(type, active) {
   if (active && !arduinoConnected) return;
@@ -163,21 +155,17 @@ function setServoState(type, active) {
   const status = item.querySelector('.servo-status');
   const color  = CAT_COLORS[type] || '#9aa3b8';
 
-  // remove any old active-* class then add the new one if active
   CATEGORIES.forEach(c => item.classList.remove(`active-${c}`));
 
   if (active) {
     wrap.className  = 'servo-icon-wrap active';
-    wrap.style.background = `${color}22`;   // tinted bg with alpha
+    wrap.style.background = `${color}22`;
     svg.setAttribute('stroke', color);
     svg.classList.add('spinning');
     status.className   = 'servo-status active';
     status.textContent = 'Activated';
     item.classList.add(`active-${type}`);
-
-    // Client-side safety reset after 4 s (server sends deactivate at 3 s)
   } else {
-    clearTimeout(_servoTimers[type]);
     wrap.className  = 'servo-icon-wrap inactive';
     wrap.style.background = '';
     svg.setAttribute('stroke', '#9aa3b8');
@@ -187,12 +175,25 @@ function setServoState(type, active) {
   }
 }
 
+// ── STATUS LAMPS ──
+function setLamps(data) {
+  if (!data) return;
+  const names = ['red', 'orange', 'green', 'blue'];
+  names.forEach((n) => {
+    const el = document.getElementById(`lamp-${n}`);
+    if (!el) return;
+    const on = !!data[n];
+    el.classList.toggle('on', on);
+    el.classList.toggle('off', !on);
+  });
+}
+
 // ── WARNING ──
 function setWarning(message, isError) {
   const el = document.getElementById('warning-message');
   if (!el) return;
   const banner = el.closest('[class*="warning"]') || el.parentElement;
-  if (!message || (!isError && message === NOMINAL_WARNING)) {
+  if (!message) {
     banner.style.display = 'none';
     return;
   }
@@ -216,7 +217,6 @@ function refreshWarningBanner() {
     }
   });
 
-  // Generic disconnect only when offline and no ErrorManager entries are active
   if (!arduinoConnected && keys.length === 0) {
     parts.push(DISCONNECT_WARNING);
   }
@@ -265,6 +265,8 @@ function shouldLogError(data) {
 }
 
 function handleSystemError(data) {
+  if (data.error_key === 'UNRECOGNIZED_OBJECT') return;
+
   if (shouldLogError(data)) {
     appendErrorLogRow(data);
   }
@@ -277,16 +279,13 @@ function handleSystemError(data) {
   };
   refreshWarningBanner();
 
-  if (data.error_key === 'UNRECOGNIZED_OBJECT') {
-    const d = data.details || {};
-    showUnrecognized(
-      `Unrecognized object detected${d.display ? ': ' + d.display : ''}` +
-        (d.total !== undefined ? ` (total: ${d.total})` : ''),
-    );
+  if (data.error_key === 'CONTROL_CONVEYOR_BLOCKED') {
+    conveyorTogglePending = false;
   }
 }
 
 function handleSystemLog(data) {
+  if (data.error_key === 'UNRECOGNIZED_OBJECT') return;
   appendErrorLogRow(data);
 }
 
@@ -390,16 +389,7 @@ function renderDebugPanel(data) {
 
 const MAX_LOG_ROWS = 100;
 
-const CAT_ICON = {
-  detection:    '',
-  sensor:       '',
-  conveyor:     '',
-  servo:        '',
-  unrecognized: '',
-};
-
 function formatTime(iso) {
-  // Show only HH:MM:SS from ISO string
   const t = iso.split('T')[1] || iso;
   return t.substring(0, 8);
 }
@@ -407,7 +397,6 @@ function formatTime(iso) {
 function appendLogRow(timestamp, category, action, details, flash = true) {
   const tbody = document.getElementById('event-log-body');
 
-  // Remove "no events" placeholder if present
   const empty = tbody.querySelector('.log-empty');
   if (empty) empty.parentElement.remove();
 
@@ -421,10 +410,8 @@ function appendLogRow(timestamp, category, action, details, flash = true) {
     <td class="log-action">${action || ''}${details ? `<span class="log-details"> — ${details}</span>` : ''}</td>
   `;
 
-  // Prepend so newest is at top
   tbody.insertBefore(tr, tbody.firstChild);
 
-  // Cap at MAX_LOG_ROWS
   while (tbody.rows.length > MAX_LOG_ROWS) {
     tbody.deleteRow(tbody.rows.length - 1);
   }
@@ -436,7 +423,6 @@ function clearLogDisplay() {
 }
 
 function populateLogFromHistory(events) {
-  // events come newest-first from the API — insert oldest first so display is newest-top
   const oldest_first = [...events].reverse();
   oldest_first.forEach(e => appendLogRow(e.timestamp, e.category, e.action, e.details, false));
 }
@@ -459,18 +445,32 @@ socket.on('disconnect', () => {
 
 socket.on('update_counts',      (data) => updateCounts(data));
 socket.on('update_conveyor',    (data) => {
-  setConveyorState(data.id, data.running ? 'running' : 'stopped', data.speed);
+  const cid = normalizeConveyorId(data.id);
+  const running = !!data.running;
+  const state = running ? 'running' : 'stopped';
+  setConveyorState(cid, state);
+  const mirrorIds = cid === 3 ? [1, 2] : (cid === 1 || cid === 2 ? [cid === 1 ? 2 : 1] : []);
+  mirrorIds.forEach((n) => {
+    if (conveyorState[n] !== 'disconnected') {
+      setConveyorState(n, state);
+    }
+  });
+  conveyorTogglePending = false;
   if (debugEnabled) appendLogRow(new Date().toISOString(), 'conveyor',
-    `Conveyor ${data.id} ${data.running ? 'started' : 'stopped'}`,
-    `speed=${data.speed} m/s`);
+    `Conveyor ${data.id} ${data.running ? 'started' : 'stopped'}`, '');
 });
 socket.on('arduino_status', (data) => {
   arduinoConnected = !!data.connected;
   if (!arduinoConnected) {
     CATEGORIES.forEach(t => setServoState(t, false));
-    [1, 2].forEach(id => setConveyorState(id, 'disconnected', null));
+    [1, 2].forEach(id => setConveyorState(id, 'disconnected'));
   } else {
-    [1, 2].forEach(id => setConveyorState(id, conveyorState[id] || 'stopped', null));
+    const conveyors = data.conveyors || [];
+    if (conveyors.length) {
+      conveyors.forEach(c => setConveyorState(normalizeConveyorId(c.id), c.running ? 'running' : 'stopped'));
+    } else {
+      [1, 2].forEach(id => setConveyorState(id, conveyorState[id] || 'stopped'));
+    }
   }
   refreshWarningBanner();
 });
@@ -480,6 +480,9 @@ socket.on('error_resolved', (data) => {
   delete activeErrors[data.error_key || data.code];
   refreshWarningBanner();
 });
+socket.on('lamp_update', (data) => setLamps(data));
+
+socket.on('lamp_update', (data) => console.log('lamp_update received', data));
 socket.on('update_servo', (data) => {
   setServoState(data.type, data.active);
 });
@@ -491,9 +494,15 @@ socket.on('servo_closed', (data) => {
 });
 socket.on('buffer_update',      (data) => renderDebugPanel(data));
 socket.on('new_detection',      (data) => {
-  if (debugEnabled) appendLogRow(data.timestamp, 'detection',
-    `Detected '${data.category}'`,
-    `confidence=${Math.round(data.confidence*100)}% frames=${data.total_frames}`);
+  if (data.category === 'unrecognized' || debugEnabled) {
+    appendLogRow(data.timestamp, 'detection',
+      `Detected '${data.category}'`,
+      `confidence=${Math.round(data.confidence * 100)}% frames=${data.total_frames}`);
+  }
+  if (data.category === 'unrecognized') {
+    const label = data.label || data.display || 'unrecognized';
+    showUnrecognized(`Unrecognized object detected: ${label}`);
+  }
 });
 socket.on('update_sensor',      (data) => {
   if (debugEnabled) appendLogRow(new Date().toISOString(), 'sensor',
@@ -508,12 +517,12 @@ async function loadInitialState() {
     const res  = await fetch('/api/state');
     const data = await res.json();
     arduinoConnected = !!(data.arduino_status && data.arduino_status.connected);
-    data.conveyors.forEach(c => setConveyorState(c.id, c.running ? 'running' : 'stopped', c.speed));
+    data.conveyors.forEach(c => setConveyorState(normalizeConveyorId(c.id), c.running ? 'running' : 'stopped'));
     if (arduinoConnected) {
       data.servos.forEach(s => setServoState(s.type, s.active));
     } else {
       CATEGORIES.forEach(t => setServoState(t, false));
-      [1, 2].forEach(id => setConveyorState(id, 'disconnected', null));
+      [1, 2].forEach(id => setConveyorState(id, 'disconnected'));
     }
     if (data.active_errors) {
       data.active_errors.forEach((err) => {
@@ -526,6 +535,7 @@ async function loadInitialState() {
     }
     refreshWarningBanner();
     updateCounts({ ...data.counts, rate: data.rate, unrecognized: data.unrecognized });
+    if (data.lamps) setLamps(data.lamps);
     console.log('Initial state loaded ✅');
     if (data.recent_events) populateLogFromHistory(data.recent_events);
   } catch (e) {
