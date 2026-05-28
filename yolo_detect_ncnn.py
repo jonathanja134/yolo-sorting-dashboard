@@ -1,5 +1,5 @@
 """
-yolo_reader.py – YOLO inference + adaptive majority-vote buffer
+yolo_reader.py – YOLO inference + adaptive majority-vote buffer TEST
                   + serial protocol (Pi ↔ Arduino) + SocketIO → Flask
                   + WebSocket MJPEG stream + local cv2 display
 
