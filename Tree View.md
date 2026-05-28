@@ -49,10 +49,6 @@
 ├─system-site-packages/
 ├─.gitignore
 ├─.python-version
-├─arduino_base.py
-├─my_model.pt
-├─my_model11n.pt
-├─my_model26n.pt
 ├─note.ipynb
 ├─test.mjpeg
 ├─video_stream.py

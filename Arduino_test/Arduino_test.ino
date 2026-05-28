@@ -135,7 +135,7 @@ void readUVButton() {
         digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
         Serial.println(uvOn ? "ACK:UV:ON" : "ACK:UV:OFF");
       }
-      // If system not running, button press is silently ignored
+      // If the system is not running, the pressed button is ignored
     }
     lastUVButtonState = currentUVButtonState;
   }
@@ -320,7 +320,7 @@ void updateSensor(Sensor &s, int servoStart, int servoEnd) {
     s.state     = LOW;
     s.triggered = false;
 
-    if (!inActuation) {
+    if (!inActuation) { // If not currently actuating, force to close any open servos in this group.
       for (int i = servoStart; i < servoEnd; i++) {
         if (servoOpen[i]) {
           moveServo(i, CLOSED_POS);
@@ -346,15 +346,23 @@ void readSerial() {
   if (rawCmd.length() == 0) return;
 
   int sep = rawCmd.indexOf(':');
-  if (sep <= 0) {
-    Serial.println("ERR:UNKNOWN_CMD");
-    return;
-  }
+
+// Check if the command readed command are correct 
+
+  if (sep <= 0)       { Serial.println("ERR:SYSTEM:UNKNOWN_CMD");            return; }
+  if (key != "LABEL") { Serial.println("ERR:SYSTEM:UNKNOWN_CMD");            return; }
+
+// Check if the system is in a state to accept commands
+
+  if (eStopActive)    { Serial.println("ERR:ESTOP:ACTIVE");           return; }
+  if (!systemRunning) { Serial.println("ERR:SYSTEM:IS_NOT_RUNNING");  return; }
 
   String key = rawCmd.substring(0, sep);
   String arg = rawCmd.substring(sep + 1);
   key.trim(); arg.trim();
   key.toUpperCase();
+
+  // Handle MOTOR commands first since it use a different format
 
   if (key == "MOTOR") {
     arg.toUpperCase();
@@ -370,31 +378,28 @@ void readSerial() {
     return;
   }
 
-  if (key != "LABEL") {
-    Serial.println("ERR:UNKNOWN_CMD");
-    return;
-  }
-
-  if (eStopActive)    { Serial.println("ERR:ESTOP:ACTIVE");           return; }
-  if (!systemRunning) { Serial.println("ERR:SYSTEM:IS_NOT_RUNNING");  return; }
-
   String category = arg;
   category.toLowerCase();
+
+  // Find servo index for the given category return error if not found
 
   int idx = -1;
   for (int i = 0; i < NB_SERVOS; i++) {
     if (category == CATEGORY_NAMES[i]) { idx = i; break; }
   }
-
   if (idx == -1) { Serial.print("ERR:BAD_CATEGORY:"); Serial.println(category); return; }
+
+// Check if the servo for the category is wired before actuating
+
   if (!servoWired[idx]) {
-    Serial.print("ERR:SERVO:"); Serial.print(idx + 1);
-    Serial.print(":NOT_WIRED:CATEGORY:"); Serial.println(CATEGORY_NAMES[idx]);
+    Serial.print("ERR:SERVO:"); 
+    Serial.print(idx + 1);
+    Serial.print(":NOT_WIRED:CATEGORY:"); 
+    Serial.println(CATEGORY_NAMES[idx]);
     return;
   }
-
-  Serial.print("ACK:LABEL:"); Serial.println(category);
-  actuateServo(idx);
+  Serial.print("ACK:LABEL:"); Serial.println(category); // aknoledged anyway to shown which category is being system 
+  actuateServo(idx); // 
 }
 
 void actuateServo(int idx) {
@@ -418,8 +423,12 @@ void actuateServo(int idx) {
   unsigned long start    = millis();
   bool          detected = false;
 
+// Wait for the sensor trigger or timeout to check if the object was sorted.
+// During this time, no new actuation can start to avoid multiple triggers
+// from the same object and to let the servo close properly.
+
   while (millis() - start < SENSOR_TIMEOUT) {
-    readSensors();
+    readSensors(); // Continuously read sensor to see if the object has reached the servo door 
     if (s.triggered) {
       detected    = true;
       s.triggered = false;

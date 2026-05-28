@@ -78,6 +78,7 @@ gap_limit = 20
 # ── SERIAL SETTINGS ────────────────────────────────────────
 BAUD = 115200
 PORT = "/dev/ttyACM0"
+SOCKET_PORT = 5000
 
 # ── CONVEYOR PIN MAPPING ──────────────────────────────────
 # Each conveyor has its own Arduino pin

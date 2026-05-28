@@ -39,7 +39,7 @@ SERIAL_NOT_CONNECTED            |  SERIAL_PORT_NOT_FOUND | SERIAL_CONNECT_FAILED
 SERIAL_READ_ERROR               |  SERIAL_WRITE_ERROR    | SERIAL_PARSE_ERROR
 SERIAL_UNRECOGNIZED_LINE        |  MOTOR_FAULT           | SERVO_NOT_WIRED 
 SERVO_FAULT                     |  SERVO_TIMEOUT         | SERVO_BLOCKED   
-SERVO_INVALID_INDEXSENSOR_FAULT |  ARDUINO_ERR           | ARDUINO_INFO
+SERVO_INVALID_INDEXSENSOR_FAULT |  ARDUINO_SYSTEM_UNKNOWN_CMD | 
 MODEL_LOAD_FAILED               |  LOW_CONFIDENCE        | UNRECOGNIZED_OBJECT
 DATABASE_CONNECTION_FAILED      |  SOCKET_DISCONNECTED   | CONFIGURATION_ERROR
 CONTROL_CONVEYOR_BLOCKED        |  UNKNOWN_ERROR
@@ -161,21 +161,29 @@ ERROR_CATALOG = {
         "message": "Arduino sensor reported malfunction.",
         "action": "Check sensor connections and alignment.",
     },
-    "ARDUINO_ERR": {
+    "ARDUINO_SYSTEM_IS_NOT_RUNNING": {
+        "code": "SYSTEM_998",
+        "severity": ErrorSeverity.WARNING,
+        "source": ErrorSource.SYSTEM,
+        "title": "System Not Running",
+        "message": "Cannot perform action: system is not running.",
+        "action": "Start the system to enable this action.",
+    },
+    "ARDUINO_PULSE_OUT_OF_RANGE": {
+        "code": "SYSTEM_997",
+        "severity": ErrorSeverity.ERROR,
+        "source": ErrorSource.SYSTEM,
+        "title": "Pulse Out of Range",
+        "message": "Pulse width is outside the acceptable range.",
+        "action": "Adjust pulse width settings.",
+    },
+    "ARDUINO_SYSTEM_UNKNOWN_CMD": {
         "code": "ARDUINO_001",
         "severity": ErrorSeverity.ERROR,
         "source": ErrorSource.ARDUINO,
         "title": "Arduino Error",
         "message": "Arduino reported an error.",
         "action": "Check Arduino serial output and firmware.",
-    },
-    "ARDUINO_INFO": {
-        "code": "ARDUINO_INFO",
-        "severity": ErrorSeverity.INFO,
-        "source": ErrorSource.ARDUINO,
-        "title": "Arduino Info",
-        "message": "Information from Arduino.",
-        "action": "None.",
     },
     # ─── YOLO / DETECTION ───────────────────────────────────────────────────────
     "MODEL_LOAD_FAILED": {
@@ -238,12 +246,12 @@ ERROR_CATALOG = {
         "action": "Reconnect Arduino before starting or stopping conveyors.",
     },
     "ESTOP_ACTIVE": {
-    "code": "SYSTEM_004",
-    "severity": ErrorSeverity.CRITICAL,
-    "source": ErrorSource.SYSTEM,
-    "title": "Emergency Stop Active",
-    "message": "E-stop triggered — motor and all servos Stopped immediately.",
-    "action": "Clear the E-stop signal to resume. System must be restarted manually.",
+        "code": "SYSTEM_004",
+        "severity": ErrorSeverity.CRITICAL,
+        "source": ErrorSource.SYSTEM,
+        "title": "Emergency Stop Active",
+        "message": "E-stop triggered — motor and all servos Stopped immediately.",
+        "action": "Clear the E-stop signal to resume. System must be restarted manually.",
     },
     "ESTOP_CLEARED": {
         "code": "SYSTEM_005",

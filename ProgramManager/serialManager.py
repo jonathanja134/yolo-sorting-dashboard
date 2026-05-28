@@ -269,28 +269,22 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
 
             # generic error messages
             if parts[0] == "ERR":
-                detail = ":".join(parts[1:])
-                error_mgr.raise_error("ARDUINO_ERR", {
+                error_type = parts[1] if len(parts) > 1 else "UNKNOWN"
+                detail = ":".join(parts[2:]) if len(parts) > 2 else ""
+                error_mgr.raise_error(f"ARDUINO_{error_type}_{detail}", {
                     "message": detail,
-                    "raw":     line,
+                    "raw": line,
+                    "type": error_type,
                 })
                 if detail.strip().upper() == "UNKNOWN_CMD":
                     def _clear_unknown_cmd():
                         try:
-                            error_mgr.resolve_error("ARDUINO_ERR")
+                            error_mgr.resolve_error("ARDUINO_SYSTEM_UNKNOWN_CMD")
                         except Exception:
                             pass
                     t = threading.Timer(10.0, _clear_unknown_cmd)
                     t.daemon = True
                     t.start()
-                continue
-
-            if parts[0] == "INFO":
-                detail = ":".join(parts[1:])
-                error_mgr.log_info("ARDUINO_INFO", {
-                    "message": detail,
-                    "raw":     line,
-                })
                 continue
 
             if "Sorting System Ready" in line:
