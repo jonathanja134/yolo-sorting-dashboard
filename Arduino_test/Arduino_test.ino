@@ -115,7 +115,7 @@ void updateOrangeLamp() {
   digitalWrite(ORANGE_LAMP_PIN, (!systemRunning && !eStopActive) ? HIGH : LOW);
 }
 
-// ── UV BUTTON ────────────────────────────────────────────────
+// ── UV BUTTONblblbl ────────────────────────────────────────────────
 // Blocked entirely when system is not running.
 // UV lamp is forced OFF when system stops (see stopSystemMotor).
 void readUVButton() {
