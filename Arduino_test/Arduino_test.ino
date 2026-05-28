@@ -22,6 +22,10 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 #define PULLDOWN_2   6
 #define PULLDOWN_R  11
 
+//Switch UV-C door
+#define DOOR_SWITCH_1 12 
+#define DOOR_SWITCH_2  13
+
 // ── START/STOP BUTTON ────────────────────────────────────────
 #define START_STOP_PIN     8
 #define BUTTON_DEBOUNCE_MS 50
@@ -79,6 +83,10 @@ bool currentUVButtonState = HIGH;
 unsigned long lastUVDebounceTime = 0;
 // ─────────────────────────────────────────────────────────────
 
+// ── DOOR SWITCH STATE ─────────────────────────────────────────
+bool door1Closed = true;
+bool door2Closed = true;
+
 struct Sensor {
   int           id;
   int           pin;
@@ -113,6 +121,29 @@ void moveServo(int idx, int angle) {
 // ── ORANGE LAMP ───────────────────────────────────────────────
 void updateOrangeLamp() {
   digitalWrite(ORANGE_LAMP_PIN, (!systemRunning && !eStopActive) ? HIGH : LOW);
+}
+
+// ── DOOR SWITCH UPDATE ────────────────────────────────────────
+// Called every loop. If either door opens → cut UV immediately.
+// If both doors close again → restore UV only if systemRunning
+// and uvOn are both true (button state is preserved).
+void readDoorSwitches() {
+  bool d1 = digitalRead(DOOR_SWITCH_1);  // HIGH = closed, LOW = open
+  bool d2 = digitalRead(DOOR_SWITCH_2);
+
+  door1Closed = (d1 == HIGH);
+  door2Closed = (d2 == HIGH);
+
+  bool bothClosed = door1Closed && door2Closed;
+
+  if (!bothClosed) {
+    // At least one door open → force UV off immediately
+    digitalWrite(UV_LAMP_PIN, LOW);
+    Serial.println("ACK:UV:OFF:DOOR_OPEN");
+  } else {
+    // Both doors closed → restore UV only if system running and button was ON
+    digitalWrite(UV_LAMP_PIN, (systemRunning && uvOn) ? HIGH : LOW);
+  }
 }
 
 // ── UV BUTTONblblbl ────────────────────────────────────────────────
@@ -275,6 +306,10 @@ void setup() {
   pinMode(START_STOP_PIN, INPUT_PULLUP);
   pinMode(ESTOP_PIN,      INPUT_PULLUP);
 
+  // Door switches
+  pinMode(DOOR_SWITCH_1, INPUT_PULLUP);
+  pinMode(DOOR_SWITCH_2, INPUT_PULLUP);
+
   for (int i = 0; i < NB_SERVOS; i++) {
     homePos[i]  = CLOSED_POS;
     servoPos[i] = CLOSED_POS;
@@ -296,6 +331,7 @@ void loop() {
   readEStop();
   readStartStopButton();
   readUVButton();
+  readDoorSwitches();
   updateOrangeLamp();
   readSensors();
   readSerial();
@@ -348,6 +384,10 @@ void readSerial() {
   int sep = rawCmd.indexOf(':');
 
 // Check if the command readed command are correct 
+  String key = rawCmd.substring(0, sep);
+  String arg = rawCmd.substring(sep + 1);
+  key.trim(); arg.trim();
+  key.toUpperCase();
 
   if (sep <= 0)       { Serial.println("ERR:SYSTEM:UNKNOWN_CMD");            return; }
   if (key != "LABEL") { Serial.println("ERR:SYSTEM:UNKNOWN_CMD");            return; }
@@ -357,11 +397,7 @@ void readSerial() {
   if (eStopActive)    { Serial.println("ERR:ESTOP:ACTIVE");           return; }
   if (!systemRunning) { Serial.println("ERR:SYSTEM:IS_NOT_RUNNING");  return; }
 
-  String key = rawCmd.substring(0, sep);
-  String arg = rawCmd.substring(sep + 1);
-  key.trim(); arg.trim();
-  key.toUpperCase();
-
+  
   // Handle MOTOR commands first since it use a different format
 
   if (key == "MOTOR") {
