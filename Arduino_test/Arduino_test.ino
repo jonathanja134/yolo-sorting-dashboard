@@ -23,19 +23,19 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 #define PULLDOWN_R  11
 
 //Switch UV-C door
-#define DOOR_SWITCH_1 12 
-#define DOOR_SWITCH_2  13
+#define DOOR_SWITCH_1 16 
+#define DOOR_SWITCH_2  17
 
 // ── START/STOP BUTTON ────────────────────────────────────────
 #define START_STOP_PIN     8
 #define BUTTON_DEBOUNCE_MS 50
 
 // ── E-STOP ───────────────────────────────────────────────────
-#define ESTOP_PIN 12
+#define ESTOP_PIN 13
 
 // ── ORANGE LAMP ──────────────────────────────────────────────
 // ON when system stopped + e-stop NOT active
-#define ORANGE_LAMP_PIN 13
+#define ORANGE_LAMP_PIN 12
 
 // ── UV BUTTON + UV LAMP ──────────────────────────────────────
 // UV button only works when systemRunning = true
@@ -62,7 +62,6 @@ const int   EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
 const int   SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
 const char* CATEGORY_NAMES[NB_SERVOS]   = { "canister", "chemical", "applicator", "inhaler" };
 
-const int MotorOnLED = 3;
 int  servoPos[NB_SERVOS];
 int  homePos[NB_SERVOS];
 bool servoOpen[NB_SERVOS]   = {};
@@ -131,8 +130,15 @@ void readDoorSwitches() {
   bool d1 = digitalRead(DOOR_SWITCH_1);  // HIGH = closed, LOW = open
   bool d2 = digitalRead(DOOR_SWITCH_2);
 
-  door1Closed = (d1 == HIGH);
-  door2Closed = (d2 == HIGH);
+  bool newDoor1Closed = (d1 == HIGH);
+  bool newDoor2Closed = (d2 == HIGH);
+
+  bool stateChanged = (newDoor1Closed != door1Closed) || (newDoor2Closed != door2Closed);
+
+  door1Closed = newDoor1Closed;
+  door2Closed = newDoor2Closed;
+
+  if (!stateChanged) return;
 
   bool bothClosed = door1Closed && door2Closed;
 
@@ -204,7 +210,6 @@ void readEStop() {
     motorRunning  = false;
 
     digitalWrite(MotorFw,    LOW);
-    digitalWrite(MotorOnLED, LOW);
 
     // Close all servos immediately, even mid-actuation
     inActuation = false;
@@ -232,7 +237,6 @@ void startSystemMotor() {
     return;
   }
   digitalWrite(MotorFw,    HIGH);
-  digitalWrite(MotorOnLED, HIGH);
   motorRunning  = true;
   systemRunning = true;
   updateOrangeLamp();
@@ -240,7 +244,6 @@ void startSystemMotor() {
 
 void stopSystemMotor(bool closeServos) {
   digitalWrite(MotorFw,    LOW);
-  digitalWrite(MotorOnLED, LOW);
   motorRunning  = false;
   systemRunning = false;
 
@@ -297,7 +300,6 @@ void setup() {
   pinMode(RESET_SENSOR, INPUT);
 
   pinMode(MotorFw,    OUTPUT); digitalWrite(MotorFw,    LOW);
-  pinMode(MotorOnLED, OUTPUT); digitalWrite(MotorOnLED, LOW);
 
   pinMode(ORANGE_LAMP_PIN, OUTPUT); digitalWrite(ORANGE_LAMP_PIN, HIGH);
   pinMode(UV_LAMP_PIN,     OUTPUT); digitalWrite(UV_LAMP_PIN,     LOW);
