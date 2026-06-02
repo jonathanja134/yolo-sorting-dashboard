@@ -77,7 +77,7 @@ class BufferManager:
       - handle_clear() : fires on manual clear (keyboard 'C'), commits whatever gathered
       - no_detection() : fires when gap_counter reaches gap_limit (fallback if no sensor)
 
-    The add() method only accumulates frames — it never auto-commits. This ensures
+    The add() method only accumulates frames, it never auto-commits. This ensures
     exactly one database entry per sensor trigger event, eliminating duplicates when
     the same object remains in view for multiple frames after triggering.
 
@@ -152,7 +152,7 @@ class BufferManager:
         self._emit_state()
 
         if snapshot is not None:
-            print(f"[BUFFER] gap limit reached — auto-commit ({len(snapshot)} frames)")
+            print(f"[BUFFER] gap limit reached -> auto-commit ({len(snapshot)} frames)")
             self._trigger_commit(snapshot)
 
     def handle_pin12(self):
@@ -185,7 +185,7 @@ class BufferManager:
     # ── handle_clear / handle_reset (keyboard 'C') ────────────────────────────
 
     def handle_reset(self):
-        """Alias for handle_clear — called by KeyboardSimulation.py."""
+        """Alias for handle_clear -> called by KeyboardSimulation.py."""
         self.handle_clear()
 
     def handle_clear(self):

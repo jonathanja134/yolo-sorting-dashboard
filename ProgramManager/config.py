@@ -83,9 +83,9 @@ SOCKET_PORT = 5000
 # ── CONVEYOR PIN MAPPING ──────────────────────────────────
 # Each conveyor has its own Arduino pin
 CONVEYOR_PINS = {
-    "conveyor_1": 10,  # Conveyor 1 on Pin 10
-    "conveyor_2": 9,   # Conveyor 2 on Pin 9
-    "conveyor_3": 8,   # Conveyor 3 on Pin 8
+    "conveyor_1": 10,  # NOTE:  Conveyor 1 and 2 currently driven by Pin 10 in arduino since no need for dependency management.
+    "conveyor_2": 9,  
+    "conveyor_3": 8,   
 }
 
 
