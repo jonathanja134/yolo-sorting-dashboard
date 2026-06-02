@@ -8,6 +8,19 @@
 ---
 
 ## System Architecture at a Glance
+```mermaid
+graph TD
+    A[Arduino.ino] --> B[yolo_detect_ncnn_headless.py]
+    B --> C[ProgramManager]
+    C --> D[Buffer.py]
+    C --> E[config.py]
+    C --> F[ErrorManager.py]
+    C --> G[KeyboardSimulation.py]
+    C --> H[serialManager.py]
+    C --> I[socketManager.py]
+
+```
+## Detection system architecture
 
 ```mermaid
 graph TD
