@@ -1,7 +1,7 @@
 import serial
 import serial.tools.list_ports
 import time
-from ProgramManager.config import BAUD, PORT
+from ProgramManager.config import BAUD
 from ProgramManager.ErrorManager import get_error_manager
 import threading
 
@@ -77,10 +77,6 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
             # Receiving any valid line means the Arduino is talking — clear connection warning
             error_mgr.resolve_error("SERIAL_NOT_CONNECTED")
 
-            # separator lines
-            if line.startswith("---"):
-                continue
-
             parts = line.split(":")
 
             if line == "ESTOP:ACTIVE":
@@ -134,46 +130,34 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 })
                 continue
 
-            # motor ack
-            if len(parts) >= 3 and parts[0] == "ACK" and parts[1].startswith("MOTOR"):
-                status  = parts[2]
-                running = status == "FORWARD"
-                conv_ids = ("conveyor_1", "conveyor_2", "conveyor_3")
-                for conv_id in conv_ids:
-                    multi_motor_state_setter(conv_id, running)
-                    emit_fn("conveyor_state", {"id": conv_id, "running": running})
-                print(f"[ARDUINO -> YOLO] motor = {'RUNNING' if running else 'STOP'}")
-                motor_running = running
-                lamp_state_updates = {}
-                if lamp_state.get('green') != motor_running:
-                    lamp_state['green'] = motor_running
-                    lamp_state_updates['green'] = motor_running
-                orange_should = (not motor_running) and (not estop_active)
-                if lamp_state.get('orange') != orange_should:
-                    lamp_state['orange'] = orange_should
-                    lamp_state_updates['orange'] = orange_should
-                if lamp_state_updates:
-                    emit_fn('lamp_update', lamp_state)
-                continue
+            # motor ack / system start-stop from physical button
+            is_motor_ack  = len(parts) >= 3 and parts[0] == "ACK" and parts[1].startswith("MOTOR")
+            is_system_ack = len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM"
 
-            # system start/stop from physical button
-            if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM":
-                running = parts[2] == "STARTED"
+            if is_motor_ack or is_system_ack:
+                running = parts[2] in ("FORWARD", "STARTED")
+                label   = "DASHBOARD BUTTON" if is_motor_ack else "ARDUINO BUTTON"
+                print(f"[{label.upper()}] System {'RUNNING' if running else 'STOP'}")
+
                 for conv_id in ("conveyor_1", "conveyor_2", "conveyor_3"):
                     multi_motor_state_setter(conv_id, running)
                     emit_fn("conveyor_state", {"id": conv_id, "running": running})
-                print(f"[ARDUINO BUTTON] System {'STARTED' if running else 'STOPPED'}")
+
                 motor_running = running
                 lamp_state_updates = {}
-                if lamp_state.get('green') != motor_running:
-                    lamp_state['green'] = motor_running
-                    lamp_state_updates['green'] = motor_running
-                orange_should = (not motor_running) and (not estop_active)
-                if lamp_state.get('orange') != orange_should:
-                    lamp_state['orange'] = orange_should
-                    lamp_state_updates['orange'] = orange_should
+
+                if lamp_state.get("green") != running:
+                    lamp_state["green"] = running
+                    lamp_state_updates["green"] = running
+
+                orange_should = not running and not estop_active
+                if lamp_state.get("orange") != orange_should:
+                    lamp_state["orange"] = orange_should
+                    lamp_state_updates["orange"] = orange_should
+
                 if lamp_state_updates:
-                    emit_fn('lamp_update', lamp_state)
+                    emit_fn("lamp_update", lamp_state)
+
                 continue
 
             # label ack
@@ -228,10 +212,7 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 elif event in ("CLOSED_OK", "CLOSED_TIMEOUT"):
                     if event == "CLOSED_TIMEOUT":
                         error_mgr.raise_error("SERVO_TIMEOUT", {
-                            "message": (
-                                f"Servo {servo_idx} ({category}) closed on timeout — "
-                                "object may not have passed."
-                            ),
+                            "message": ( f"Servo {servo_idx} ({category}) closed on timeout."),
                             "servo_type":  category,
                             "servo_index": servo_idx,
                         })
@@ -451,7 +432,6 @@ class SerialManager:
     def connect(self, port: str | None = None, emit_fn=None):
         """
         Connect to the Arduino.
-
         If *port* is given it is tried first; if that fails (or no port is
         given) auto-detection is used as a fallback.
         """
