@@ -49,7 +49,7 @@ model_dir  = os.path.join(script_dir, "my_model_ncnn_model",Yolo_model)
 param_file = os.path.join(model_dir, "model.ncnn.param")
 bin_file   = os.path.join(model_dir, "model.ncnn.bin")
 
-error_mgr = get_error_manager()
+# error_mgr = get_error_manager()
 
 # ── Serial (Pi ↔ Arduino) —─────—─────—─────—─────—─────—─────—─────—─────—────
 serial = SerialManager(baud=BAUD)
@@ -319,11 +319,15 @@ FRAME_BUDGET_S = 1.0 / TARGET_FPS
 fps_buffer = []
 prev_t     = None
 
-# Put terminal in cbreak mode so keystrokes arrive without Enter
-_old_term = termios.tcgetattr(sys.stdin)
-tty.setcbreak(sys.stdin.fileno())
+USE_KEYBOARD = sys.stdin.isatty() # prevent fail at boot start headless
 
+if USE_KEYBOARD:
+    _old_term = termios.tcgetattr(sys.stdin)
+    tty.setcbreak(sys.stdin.fileno())
+else:
+    print("[INFO] No TTY detected — keyboard input disabled")
 print("Inference running (headless) — SPACE=sensor trigger  C=sensor clear  Q=quit")
+
 
 try:
     while True:
@@ -420,8 +424,8 @@ try:
                 fps_buffer.pop(0)
         prev_t = now
         avg_fps = sum(fps_buffer) / len(fps_buffer) if fps_buffer else 0.0
-        # cv2.putText(frame, f"FPS: {avg_fps:.1f}",
-        #             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        cv2.putText(frame, f"FPS: {avg_fps:.1f}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
         #if len(fps_buffer) == 30:  # every ~1 second at 30fps
             #print(f"FPS: {avg_fps:.1f}  |  frame_time: {elapsed*1000:.1f}ms")
 

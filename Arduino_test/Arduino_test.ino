@@ -14,7 +14,7 @@ int  homePos[NB_SERVOS];
 bool servoOpen[NB_SERVOS]   = {};
 bool servoWired[NB_SERVOS]  = {};
 bool motorRunning = false;
-bool inActuation  = false;a
+bool inActuation  = false;
 
 bool systemRunning      = false;
 bool eStopActive        = false;

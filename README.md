@@ -244,3 +244,8 @@ yolo_reader.py
 | `gap_limit` | Max empty frames before the vote window resets |
 | `BAUD` / `PORT` | Serial connection to Arduino |
 | `Yolo_model` | Sub-folder name of the NCNN model to load |
+
+### Service control
+
+Start the service: `sudo systemctl start yolo.service`  
+Stop the service: `sudo systemctl stop yolo.service`
