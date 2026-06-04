@@ -41,9 +41,7 @@ struct Sensor {
   unsigned long lastEdge;
 };
 
-Sensor sensors[2] = {
-  { 1, POS_SENSOR_1, LOW, LOW, false, 0 },
-};
+Sensor sensors[1] = {  { 1, POS_SENSOR_1, LOW, LOW, false, 0 }};
 
 // ── HELPERS ──────────────────────────────────────────────────
 uint16_t angleToPulse(int angle) {
@@ -106,9 +104,9 @@ void readUVButton() {
   }
 
   if ((millis() - lastUVDebounceTime) > BUTTON_DEBOUNCE_MS) {
-    if (currentUVButtonState == LOW && lastUVButtonState == HIGH) {// rising edge -> button pressed
+    if (currentUVButtonState == LOW && lastUVButtonState == HIGH) {// falling edge -> button pressed
       // Only toggle UV if system is running
-      if (systemRunning) {
+      if (systemRunning && door1Closed && door2Closed) {
         uvOn = !uvOn;
         digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
         Serial.println(uvOn ? "ACK:UV:ON" : "ACK:UV:OFF");
@@ -274,7 +272,7 @@ void loop() {
   readSerial();
 }
 
-void updateSensor(Sensor &s, int servoStart, int servoEnd) {
+void updateSensor(Sensor &s) {
   unsigned long now     = millis();
   bool          reading = digitalRead(s.pin);
 
@@ -296,8 +294,7 @@ void updateSensor(Sensor &s, int servoStart, int servoEnd) {
 }
 
 void readSensors() {
-  updateSensor(sensors[0], 0, 2);
-  updateSensor(sensors[1], 2, 4);
+  updateSensor(sensors[0]);
 }
 
 void readSerial() {
@@ -310,13 +307,14 @@ void readSerial() {
 
   int sep = rawCmd.indexOf(':');
 
+  if (sep <= 0) { Serial.println("ERR:SYSTEM:UNKNOWN_CMD"); return; }
+
 // Check if the command readed command are correct 
   String key = rawCmd.substring(0, sep);
   String arg = rawCmd.substring(sep + 1);
   key.trim(); arg.trim();
   key.toUpperCase();
 
-  if (sep <= 0) { Serial.println("ERR:SYSTEM:UNKNOWN_CMD"); return; }
 
   // MOTOR:STOP can always run — move it before all guards
   if (key == "MOTOR" && arg == "STOP") {
@@ -363,8 +361,9 @@ void readSerial() {
 }
 
 void actuateServo(int idx) {
+  if (inActuation) return;
   inActuation = true;
-  Sensor &s = sensors[(idx < 2) ? 0 : 1];
+  Sensor &s = sensors[0];
   s.triggered = false;
   int openPos = getOpenPos(idx);// return oppen position based on the servo index (left or right)
 
@@ -384,11 +383,22 @@ void actuateServo(int idx) {
 // and to let the servo close properly.
 
  const unsigned long TIMEOUT = (idx < 2) ? TIMEOUT_1 : TIMEOUT_2; // use different timeouts for the 2 zones since the 2nd zone is further and the object may take more time to reach it
+  while (millis() - start < TIMEOUT) {
+    readEStop();
+    if (eStopActive){
+      detected = true;
+      break;
+    }
+    updateSensor(s); // update the sensor state during the wait
+    if (s.triggered) {
+      detected = true;
+      break;
+    }
   }
   moveServo(idx, CLOSED_POS);
   servoOpen[idx] = false;
   inActuation    = false;
 
   //SERVO:X:CLOSED:CATEGORY:<category>:CHANNEL:Z
-  Serial.println("SERVO:" + String(idx + 1) + (detected ? ":CLOSED_OK" : ":CLOSED_TIMEOUT") + ":CATEGORY:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
+  Serial.println("SERVO:" + String(idx + 1) + (detected ? ":UNSORTED" : ":SORTED") + ":CATEGORY:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
 }
