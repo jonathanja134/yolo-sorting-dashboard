@@ -43,7 +43,6 @@ struct Sensor {
 
 Sensor sensors[2] = {
   { 1, POS_SENSOR_1, LOW, LOW, false, 0 },
-  { 2, POS_SENSOR_2, LOW, LOW, false, 0 }
 };
 
 // ── HELPERS ──────────────────────────────────────────────────
@@ -234,8 +233,6 @@ void setup() {
   pinMode(PULLDOWN_R, OUTPUT); digitalWrite(PULLDOWN_R, LOW);
 
   pinMode(POS_SENSOR_1, INPUT);
-  pinMode(POS_SENSOR_2, INPUT);
-  pinMode(RESET_SENSOR, INPUT);
 
   pinMode(MotorFw,    OUTPUT); digitalWrite(MotorFw,    LOW);
 
@@ -386,17 +383,7 @@ void actuateServo(int idx) {
 // During this time, no new actuation can start to avoid multiple triggers from the same object
 // and to let the servo close properly.
 
- const unsigned long SENSOR_TIMEOUT = (idx < 2) ? SENSOR_TIMEOUT_1 : SENSOR_TIMEOUT_2; // use different timeouts for the 2 zones since the 2nd zone is further and the object may take more time to reach it
-
-  while (millis() - start < SENSOR_TIMEOUT) {
-    readSensors(); // Continuously read sensor to see if the object has reached the servo door 
-    if (s.triggered) { // if the sensor is triggered, it means that the object has reached the servo door and is ready to be sorted
-      detected    = true;
-      s.triggered = false;// reset trigger for next time
-      //SERVO:X:OBJECT_DETECTED:CATEGORY:<category>:CHANNEL:Z
-      Serial.println("SERVO:" + String(idx + 1) + ":OBJECT_DETECTED:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
-      break;
-    }
+ const unsigned long TIMEOUT = (idx < 2) ? TIMEOUT_1 : TIMEOUT_2; // use different timeouts for the 2 zones since the 2nd zone is further and the object may take more time to reach it
   }
   moveServo(idx, CLOSED_POS);
   servoOpen[idx] = false;
