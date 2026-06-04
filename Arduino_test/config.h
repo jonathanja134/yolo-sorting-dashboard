@@ -12,8 +12,6 @@
 
 // ── SENSORS ──────────────────────────────────────────────────
 #define POS_SENSOR_1  4
-#define POS_SENSOR_2  2
-#define RESET_SENSOR  5
 
 // ── PULLDOWNS ────────────────────────────────────────────────
 #define PULLDOWN_1   7

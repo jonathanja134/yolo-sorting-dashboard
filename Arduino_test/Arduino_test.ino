@@ -43,7 +43,6 @@ struct Sensor {
 
 Sensor sensors[2] = {
   { 1, POS_SENSOR_1, LOW, LOW, false, 0 },
-  { 2, POS_SENSOR_2, LOW, LOW, false, 0 }
 };
 
 // ── HELPERS ──────────────────────────────────────────────────
@@ -234,8 +233,6 @@ void setup() {
   pinMode(PULLDOWN_R, OUTPUT); digitalWrite(PULLDOWN_R, LOW);
 
   pinMode(POS_SENSOR_1, INPUT);
-  pinMode(POS_SENSOR_2, INPUT);
-  pinMode(RESET_SENSOR, INPUT);
 
   pinMode(MotorFw,    OUTPUT); digitalWrite(MotorFw,    LOW);
 
