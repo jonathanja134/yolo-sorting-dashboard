@@ -3,11 +3,11 @@ from datetime import datetime
 
 """
 SERIAL_NOT_CONNECTED         | SERIAL_DEVICE_UNREACHABLE     | SERIAL_PARSE_ERROR
-SERIAL_UNRECOGNIZED_LINE     | MOTOR_FAULT                   | SERVO_NOT_WIRED 
-SERVO_TIMEOUT                | ARDUINO_SYSTEM_IS_NOT_RUNNING | ARDUINO_SYSTEM_UNKNOWN_CMD      
+SERIAL_UNRECOGNIZED_LINE     | MOTOR_FEEDBACK_MISMATCH       | SERVO_NOT_WIRED 
+UNSORTED                     | ARDUINO_SYSTEM_IS_NOT_RUNNING | ARDUINO_SYSTEM_UNKNOWN_CMD      
 DATABASE_CONNECTION_FAILED   | SOCKET_DISCONNECTED           | CONTROL_CONVEYOR_BLOCKED
 ARDUINO_PULSE_OUT_OF_RANGE   | ESTOP_ACTIVE                  | ESTOP_CLEARED                
-UNKNOWN_ERROR
+UNKNOWN_ERROR                
 """
 
 
@@ -66,14 +66,6 @@ ERROR_CATALOG = {
         "action": "Check serial protocol and firmware version.",
     },
     # ─── ARDUINO HARDWARE ─────────────────────────────────────────────────────
-    "MOTOR_FAULT": {
-        "code": "MOTOR_001",
-        "severity": ErrorSeverity.ERROR,
-        "source": ErrorSource.CONVEYOR,
-        "title": "Motor Fault",
-        "message": "Conveyor motor encountered a fault.",
-        "action": "Check motor connections and power supply.",
-    },
     "SERVO_NOT_WIRED": {
         "code": "SERVO_005",
         "severity": ErrorSeverity.ERROR,
@@ -81,6 +73,22 @@ ERROR_CATALOG = {
         "title": "Servo Not Wired",
         "message": "Servo is not physically connected or wiring check failed.",
         "action": "Check servo wiring and PCA9685 channel assignment.",
+    },
+    "MOTOR_FEEDBACK_MISMATCH": {
+        "code": "MOTOR_002",
+        "severity": ErrorSeverity.ERROR,
+        "source": ErrorSource.CONVEYOR,
+        "title": "Motor Feedback Mismatch",
+        "message": "Motor feedback does not match expected state.",
+        "action": "Check motor feedback connections and control logic.",
+    },
+    "UNSORTED": {
+        "code": "SERVO_004",
+        "severity": ErrorSeverity.WARNING,
+        "source": ErrorSource.SERVO,
+        "title": "Unsorted Object",
+        "message": "Object was not sorted and reached the rejecting area.",
+        "action": "Check tmeout settings and object path. Consider adjusting servo timing or placement.",
     },
     "SERVO_FAULT": {
         "code": "SERVO_003",
