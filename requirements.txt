@@ -19,3 +19,4 @@ Pillow==12.2.0
 tqdm==4.67.1
 requests==2.32.3
 python-dotenv==1.0.1
+ncnn == 1.0.20260114

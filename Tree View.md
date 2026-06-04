@@ -29,16 +29,7 @@
 ├─images_captured/
 ├─my_model_ncnn_model/
 │　├─yolo11n/
-│　│　├─__pycache__/
-│　│　├─metadata.yaml
-│　│　├─model_ncnn.py
-│　│　├─model.ncnn.bin
-│　│　└─model.ncnn.param
 │　├─yolo11s/
-│　│　├─metadata.yaml
-│　│　├─model_ncnn.py
-│　│　├─model.ncnn.bin
-│　│　└─model.ncnn.param
 │　└─yolo26n/
 │　　　├─__pycache__/
 │　　　├─metadata.yaml

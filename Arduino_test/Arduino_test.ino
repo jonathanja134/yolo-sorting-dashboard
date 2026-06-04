@@ -264,7 +264,7 @@ void setup() {
     }
   }
 
-  Serial.println("=== Sorting System Ready ===");
+  Serial.println("========= Sorting System Ready =========");
 }
 
 void loop() {
@@ -338,7 +338,7 @@ void readSerial() {
       startSystemMotor();
       if (!eStopActive) Serial.println("ACK:MOTOR:FORWARD");
     } else {
-      Serial.print("ERR:MOTOR:UNKNOWN:" + String(arg));
+      Serial.print("ERR:MOTOR:UNKNOWN:" + String(arg)); // Probably unwired motor once feedback wired (to be added)
     }
     return;
   }

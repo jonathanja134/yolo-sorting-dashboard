@@ -18,29 +18,18 @@ Serial protocol (Arduino → Pi):
   SERVO:X:OPEN / CLOSED_OK / CLOSED_TIMEOUT / OBJECT_DETECTED / BLOCKED
   ERR:<detail>
   INFO:<detail>
-  ---------------------   (separator lines – ignored)
 
-STREAM LAG FIXES (v2):
-  - Frame sequence number → WS handler skips already-sent frames
-  - asyncio.wait_for timeout → slow clients don't block the server
-  - TARGET_FPS capped at 30 → CPU no longer saturated at 600 FPS
-  - Stream frame resized to 480×480 + JPEG quality 35 → smaller payload
 """
-import serial, os, argparse, numpy as np, time
-import sys, select, tty, termios          # ← replaces cv2 keyboard handling
-import ncnn, cv2, threading, asyncio, websockets
+import serial, os, numpy as np, time, sys, select, tty, termios, ncnn, cv2, threading, asyncio, websockets
 from collections import Counter
 from picamera2 import Picamera2
-from ProgramManager.KeyboardSimulation import kb_sensor_triggered, kb_sensor_clear, configure_buffer_manager
 from ProgramManager.event_bus import configure_emit, _async_emit
 from ProgramManager.serialManager import SerialManager, serial_reader
 from ProgramManager.socketManager import SocketManager
-from ProgramManager.Buffer import BufferManager
-from ProgramManager.config import (
-    labels, num_classes, bbox_colors,
-    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY,
-    BAUD, PORT, input_size, conf_thresh, nms_thresh, min_frames, gap_limit,Yolo_model
-)
+from ProgramManager.Buffer import BufferManager,configure_buffer_manager
+from ProgramManager.config import ( labels, num_classes, bbox_colors,
+                                    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT,
+                                    input_size, conf_thresh, nms_thresh, min_frames, gap_limit,Yolo_model)
 from ProgramManager.ErrorManager import get_error_manager
 
 # ── Model paths ───────────────────────────────────────────────────────────────
@@ -57,14 +46,11 @@ print("|0| Serial Manager created")
 
 # ── Conveyor motor states (3 separate conveyors) ─────────────────────────────
 # threading lock ensures that only one system at the time can edit the variable
-# Conveyor 1: Pin 10
-motor_1_running = False
+motor_1_running = False # Conveyor 1: Pin 10
 motor_1_lock    = threading.Lock()
-# Conveyor 2: Pin 9
-motor_2_running = False
+motor_2_running = False # Conveyor 2: Pin 9
 motor_2_lock    = threading.Lock()
-# Conveyor 3: Pin 8
-motor_3_running = False
+motor_3_running = False # Conveyor 3: Pin 8
 motor_3_lock    = threading.Lock()
 
 def _get_multi_conveyor_states():
@@ -271,10 +257,9 @@ async def yolo_handler(ws):
                     await asyncio.wait_for(ws.send(data), timeout=0.10)
                     last_sent_seq = seq
                 except asyncio.TimeoutError:
-                    # Client too slow → drop this frame, try the next one
                     pass
 
-            await asyncio.sleep(0.033)   # target ~30 fps per client
+            await asyncio.sleep(0.033)  
     except websockets.exceptions.ConnectionClosed:
         pass
 
@@ -294,17 +279,6 @@ def draw_servo_overlay(frame):
     if cat is None or time.time() > until:
         return
 
-    # ── overlay drawing removed (headless) ──────────────────────────────────
-    #color = SERVO_COLOR.get(cat, (200, 200, 200))
-    #label = SERVO_LABEL.get(cat, cat.capitalize())
-    #h, w  = frame.shape[:2]
-    #overlay = frame.copy()
-    #cv2.rectangle(overlay, (0, h - 50), (w, h), color, -1)
-    #cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-    #cv2.putText(frame, f"ACTIVE: {label}",
-    #            (12, h - 16),
-    #            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
-
 # ── Non-blocking stdin keyboard reader ───────────────────────────────────────
 def _read_key():
     """Return a single char if one is waiting on stdin, else None."""
@@ -313,9 +287,7 @@ def _read_key():
     return None
 
 # ── Main inference loop ───────────────────────────────────────────────────────
-# FIX: was 600 – saturated the CPU for no benefit; 30 is plenty for inference
-TARGET_FPS     = 30
-FRAME_BUDGET_S = 1.0 / TARGET_FPS
+
 fps_buffer = []
 prev_t     = None
 
@@ -426,29 +398,11 @@ try:
         avg_fps = sum(fps_buffer) / len(fps_buffer) if fps_buffer else 0.0
         cv2.putText(frame, f"FPS: {avg_fps:.1f}",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
-        #if len(fps_buffer) == 30:  # every ~1 second at 30fps
-            #print(f"FPS: {avg_fps:.1f}  |  frame_time: {elapsed*1000:.1f}ms")
 
         # ── Push clean frame to WebSocket encoder ─────────────────────────────
         with frame_lock:
             latest_frame = frame.copy()
         encode_event.set()
-
-        # ── Non-blocking keyboard input (replaces cv2.waitKey) ────────────────
-        key = _read_key()
-        if key == 'q':
-            break
-        elif key == ' ':
-            kb_sensor_triggered()
-        elif key == 'c':
-            kb_sensor_clear()
-
-        # ── 30 FPS cap ────────────────────────────────────────────────────────
-        # FIX: was TARGET_FPS=600 → loop was spinning and saturating the CPU
-        elapsed   = time.time() - loop_start
-        remainder = FRAME_BUDGET_S - elapsed
-        if remainder > 0:
-            time.sleep(remainder)
 
 except KeyboardInterrupt:
     pass
