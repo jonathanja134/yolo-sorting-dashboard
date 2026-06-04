@@ -43,6 +43,6 @@
 
 // ── TIMING ───────────────────────────────────────────────────
 const unsigned long SERVO_OPEN_MS      = 500; // Time to wait for a servo to open before checking the sensor
-const unsigned long SENSOR_TIMEOUT_1   = 1000; // Time to wait for the object to be detected by the sensor after opening the servo in the 1st zone (closer, so shorter timeout)
-const unsigned long SENSOR_TIMEOUT_2   = 4000; // Time to wait for the object to be detected by the sensor after opening the servo in the 2nd zone (further, so longer timeout)
+const unsigned long TIMEOUT_1   = 1000; // Time to wait for the object to be detected by the sensor after opening the servo in the 1st zone (closer, so shorter timeout)
+const unsigned long TIMEOUT_2   = 4000; // Time to wait for the object to be detected by the sensor after opening the servo in the 2nd zone (further, so longer timeout)
 const unsigned long DEBOUNCE_MS        = 50; // Debounce time for buttons and sensors to avoid multiple triggers from a single press or object
