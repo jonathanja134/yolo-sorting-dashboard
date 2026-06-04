@@ -245,7 +245,12 @@ yolo_reader.py
 | `BAUD` / `PORT` | Serial connection to Arduino |
 | `Yolo_model` | Sub-folder name of the NCNN model to load |
 
-### Service control
+## Service control
 
-Start the service: `sudo systemctl start yolo.service`  
-Stop the service: `sudo systemctl stop yolo.service`
+the system is started on the boot automaticaly but can be stoped and restarted using the following command respectively for the yolo pipeline and the dashboard 
+
+Start YOLO: `sudo systemctl start yolo.service`  
+Stop YOLO: `sudo systemctl stop yolo.service`
+
+Start the Dashboard: `sudo systemctl start dashboard.service`  
+Stop the Dashboard: `sudo systemctl stop dashboard.service`
