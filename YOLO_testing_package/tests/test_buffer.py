@@ -117,6 +117,18 @@ class TestComputeResult:
         assert r["winner"]     == "Applicator pink"
         assert r["confidence"] == pytest.approx(1.0)
 
+    def test_tie_votes_return_first_seen_winner(self):
+        votes = [
+            ("Canister", 0.90),
+            ("Inhaler bleu", 0.92),
+            ("Canister", 0.80),
+            ("Inhaler bleu", 0.85),
+        ]
+        r = compute_result(votes, min_frames=1)
+        assert r["confidence"] == pytest.approx(0.5)
+        assert r["vote_counts"] == {"Canister": 2, "Inhaler bleu": 2}
+        assert r["winner"] in {"Canister", "Inhaler bleu"}
+
 
 # ══════════════════════════════════════════════════════════════════════
 # DetectionBuffer  (stateful, frame-by-frame)

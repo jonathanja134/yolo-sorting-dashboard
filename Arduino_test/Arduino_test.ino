@@ -14,7 +14,7 @@ int  homePos[NB_SERVOS];
 bool servoOpen[NB_SERVOS]   = {};
 bool servoWired[NB_SERVOS]  = {};
 bool motorRunning = false;
-bool inActuation  = false;a
+bool inActuation  = false;
 
 bool systemRunning      = false;
 bool eStopActive        = false;
@@ -261,7 +261,7 @@ void setup() {
     }
   }
 
-  Serial.println("=== Sorting System Ready ===");
+  Serial.println("========= Sorting System Ready =========");
 }
 
 void loop() {
@@ -335,7 +335,7 @@ void readSerial() {
       startSystemMotor();
       if (!eStopActive) Serial.println("ACK:MOTOR:FORWARD");
     } else {
-      Serial.print("ERR:MOTOR:UNKNOWN:" + String(arg));
+      Serial.print("ERR:MOTOR:UNKNOWN:" + String(arg)); // Probably unwired motor once feedback wired (to be added)
     }
     return;
   }

@@ -72,7 +72,7 @@ nms_thresh = 0.45
 
 # ── BUFFER SETTINGS ────────────────────────────────────────
 
-min_frames = 60
+min_frames = 20
 gap_limit = 20
 
 # ── SERIAL SETTINGS ────────────────────────────────────────

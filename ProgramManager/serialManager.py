@@ -76,13 +76,14 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
             print(f"[SERIAL <-] {line}")
             # Receiving any valid line means the Arduino is talking — clear connection warning
             error_mgr.resolve_error("SERIAL_NOT_CONNECTED")
-
+            error_mgr.resolve_error("SERIAL_DEVICE_UNREACHABLE")
+            
             parts = line.split(":")
 
             if line == "ESTOP:ACTIVE":
                 estop_active   = True
                 motor_running  = False
-                lamp_state_updates = {}
+                lamp_state_updates = {} 
                 if not lamp_state.get('red'):
                     lamp_state_updates['red']   = True
                     lamp_state['red']           = True
@@ -126,11 +127,10 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 emit_fn("sensor_update", {
                     "id":           f"sensor_{sensor_id}",
                     "triggered":    event == "TRIGGERED",
-                    "distance_cm":  None,
                 })
                 continue
 
-            # motor ack / system start-stop from physical button
+            # motor ack (dashboard through Arduino feedback) / system start-stop (Physical button feedback))
             is_motor_ack  = len(parts) >= 3 and parts[0] == "ACK" and parts[1].startswith("MOTOR")
             is_system_ack = len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM"
 
@@ -188,7 +188,7 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                     continue
                 category = servo_index_to_category.get(servo_idx)
                 if category is None:
-                    error_mgr.raise_error("SERVO_INVALID_INDEX", {
+                    error_mgr.raise_error("SERIAL_PARSE_ERROR", {
                         "message":     f"Unknown servo index {servo_idx}",
                         "servo_index": servo_idx,
                         "raw":         line,
@@ -278,7 +278,7 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
 
         except Exception as e:
             print(f"[SERIAL] read error: {e}")
-            error_mgr.raise_error("SERIAL_READ_ERROR", {"exception": str(e)})
+            error_mgr.raise_error("SERIAL_DEVICE_UNREACHABLE", {"exception": str(e)})
             time.sleep(0.05)
 
 
@@ -430,47 +430,38 @@ class SerialManager:
     # ── PUBLIC API ────────────────────────────────────────────────────────────
 
     def connect(self, port: str | None = None, emit_fn=None):
-        """
-        Connect to the Arduino.
-        If *port* is given it is tried first; if that fails (or no port is
-        given) auto-detection is used as a fallback.
-        """
         error_mgr = get_error_manager(emit_fn)
 
         with self._connect_lock:
-            # Try the explicit port first
-            if port and self._open_port(port):
-                return
-
             if port:
-                # Explicit port failed — warn and fall through to auto-detect
-                msg = f"Explicit port {port} failed, falling back to auto-detect"
-                print(f"[SERIAL WARNING] {msg}")
-                if error_mgr:
-                    error_mgr.raise_error("SERIAL_CONNECT_FAILED", {
-                        "port":   port,
-                        "reason": msg,
-                    })
+                if self._open_port(port):
+                    return
+                explicit_failed = True
+            else:
+                explicit_failed = False
 
             # Auto-detect
             detected = self.find_arduino_port()
-            if detected is None:
-                self.available = False
-                if error_mgr:
-                    error_mgr.raise_error("SERIAL_PORT_NOT_FOUND", {
-                        "reason": "No Arduino detected on any available port",
-                    })
-                print("[SERIAL WARNING] No Arduino detected — running in OFFLINE mode")
+            if detected and self._open_port(detected):
                 return
+            
+            self.available = False
 
-            if not self._open_port(detected):
-                self.available = False
+            if detected:
+                # device exists but cannot be opened
                 if error_mgr:
-                    error_mgr.raise_error("SERIAL_CONNECT_FAILED", {
-                        "port":   detected,
-                        "reason": "Port found but could not be opened",
+                    error_mgr.raise_error("SERIAL_DEVICE_UNREACHABLE", {
+                        "port": detected,
+                        "reason": "Device detected but serial open failed",
                     })
-                print(f"[SERIAL WARNING] Failed to open detected port {detected} — OFFLINE mode")
+            else:
+                # nothing found at all
+                if error_mgr:
+                    error_mgr.raise_error("SERIAL_NOT_CONNECTED", {
+                        "reason": "No Arduino detected on any port",
+                    })
+
+            print("[SERIAL WARNING] Arduino not available — OFFLINE mode")
 
     def serial_ok(self) -> bool:
         """Return True only when the serial port is open and usable."""
@@ -494,7 +485,7 @@ class SerialManager:
         except Exception as e:
             print(f"[SERIAL ERROR] send failed: {e}")
             if error_mgr:
-                error_mgr.raise_error("SERIAL_WRITE_ERROR", {
+                error_mgr.raise_error("SERIAL_DEVICE_UNREACHABLE", {
                     "exception": str(e),
                     "message":   msg,
                 })

@@ -1,4 +1,5 @@
 import queue
+from cv2 import data
 import socketio
 import threading
 import time
@@ -99,8 +100,9 @@ class SocketManager:
         while True:
             event, data = self._emit_queue.get()
             try:
-                if self.sio.connected:
-                    self.sio.emit(event, data)
+                while not self.sio.connected:
+                    time.sleep(0.1)
+                self.sio.emit(event, data)
             except Exception as e:
                 print(f"[EMIT] error: {e}")
             finally:
@@ -115,7 +117,7 @@ class SocketManager:
                 self.sio.connect(self.server_url)
                 print(f"SocketIO connected to {self.server_url} ({self.sio.transport()})")
                 self.sio.emit("test_latency", {"t": time.time()})
-                break
+                self.sio.wait()
             except Exception as e:
                 print(f"SocketIO connect failed ({e}), retrying...")
                 time.sleep(3)

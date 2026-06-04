@@ -36,6 +36,13 @@ import threading
 import time
 from collections import Counter
 
+_buf_mgr = None
+
+
+def configure_buffer_manager(buffer_manager):
+    global _buf_mgr
+    _buf_mgr = buffer_manager
+
 class DetectionBuffer:
     """
     Low-level vote accumulator. No collecting flag — always active.
@@ -265,7 +272,7 @@ class BufferManager:
 
         result = self._compute_result(votes) if votes else None
         self._emit("buffer_update", {
-            "collecting":   True,   # always collecting
+            "collecting":   True,  
             "total_frames": len(votes),
             "min_frames":   self._min_frames,
             "gap_counter":  gap,
@@ -301,7 +308,7 @@ class BufferManager:
 
     @property
     def collecting(self) -> bool:
-        return True  # always collecting
+        return True 
 
     @property
     def gap_counter(self) -> int:
