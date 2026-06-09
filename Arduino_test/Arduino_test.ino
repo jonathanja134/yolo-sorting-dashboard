@@ -346,7 +346,7 @@ void updateSensor(Sensor &s) {
   if (reading == HIGH && s.state == LOW) {// Rising edge → object detected by sensor
     s.state     = HIGH;
     s.triggered = true;
-    Serial.print("SENSOR:"); Serial.print(s.id); Serial.println(":TRIGGERED");
+    Serial.print("SENSOR:"); Serial.print(s.id); Serial.println(":TRIGGERED"); Serial.println("SENSOR: OBJECT_NOT_DETECTED");
 
   } else if (reading == LOW && s.state == HIGH) { // Falling edge → object left the sensor
     s.state     = LOW;
@@ -433,7 +433,6 @@ void actuateServo(int idx) {
   Serial.println("SERVO:" + String(idx + 1) + ":OPEN:" + String(openPos) + ":CATEGORY:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
 
   delay(SERVO_OPEN_MS);
-  s.triggered = false; // initialise trigger
 
   unsigned long start    = millis();
   bool detected = false;
