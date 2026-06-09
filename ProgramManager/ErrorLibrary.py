@@ -1,5 +1,4 @@
 from enum import Enum
-from datetime import datetime
 
 """
 SERIAL_NOT_CONNECTED         | SERIAL_DEVICE_UNREACHABLE     | SERIAL_PARSE_ERROR

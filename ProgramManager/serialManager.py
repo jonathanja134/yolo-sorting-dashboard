@@ -130,13 +130,8 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 })
                 continue
 
-            # motor ack (dashboard through Arduino feedback) / system start-stop (Physical button feedback))
-            is_motor_faulty = (len(parts) == 3 and parts[0] == "ERR" and parts[1] == "MOTOR" and parts[2] == "FEEDBACK_MISMATCH")
-            is_motor_ack    = (len(parts) == 3 and parts[0] == "ACK" and parts[1] == "MOTOR" and parts[2] in ("FORWARD", "STOP"))
-            is_system_ack   = (len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM" and parts[2] in ("STARTED", "STOPPED"))
-            if is_motor_faulty:
-                error_mgr.raise_error("MOTOR_FEEDBACK_MISMATCH")
-                continue
+            is_motor_ack  = len(parts) >= 3 and parts[0] == "ACK" and parts[1].startswith("MOTOR")
+            is_system_ack = len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM"
             if is_motor_ack or is_system_ack:
                 running = parts[2] in ("FORWARD", "STARTED")
                 label   = "DASHBOARD BUTTON" if is_motor_ack else "ARDUINO BUTTON"
@@ -198,7 +193,6 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                     })
                     continue
                 if event == "OPEN":
-                    error_mgr.resolve_error("SERVO_BLOCKED")
                     if servo_idx in unwired_servos:
                         del unwired_servos[servo_idx]
                         _sync_servo_not_wired_error()
@@ -212,26 +206,20 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                         "type":  category,
                         "index": servo_idx,
                     })
-                elif event in ("UNSORTED", "SORTED"):
-                    if event == "SORTED":
-                        error_mgr.resolve_error("UNSORTED")
-                        set_active_servo(None, 0.0)
-                        emit_fn("servo_closed", {
-                            "type":   category,
-                            "index":  servo_idx,
-                            "status": event.lower(),
-                        })
-                    else:
+                elif event in ("SORTED", "UNSORTED"):
+                    if event == "UNSORTED":
                         error_mgr.raise_error("UNSORTED", {
-                            "message": ( f"Servo {servo_idx} ({category}) closed on timeout."),
-                            "servo_type":  category,
-                            "servo_index": servo_idx,
-                        })
-                elif event == "BLOCKED":
-                    error_mgr.raise_error("SERVO_BLOCKED", {
                         "message":     f"Servo {servo_idx} ({category}) blocked at start",
                         "servo_type":  category,
                         "servo_index": servo_idx,
+                        })
+                    else:
+                        error_mgr.resolve_error("UNSORTED")
+                    set_active_servo(None, 0.0)
+                    emit_fn("servo_closed", {
+                        "type":   category,
+                        "index":  servo_idx,
+                        "status": event.lower(),
                     })
                 continue
 

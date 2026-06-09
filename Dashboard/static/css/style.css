@@ -19,10 +19,10 @@
   --radius: 14px;
 
   /* ── 4 category colours ── */
-  --c-applicator: #3b82f6;   /* blue   */
-  --c-inhaler:    #a855f7;   /* purple */
-  --c-chemical:   #0ea5e9;   /* sky blue */
-  --c-canister:   #f59e0b;   /* amber  */
+  --c-canister:   rgb(123, 123, 123);   /* light gray */
+  --c-chemical:   rgb(119, 46, 0);   /* dark blue  */
+  --c-applicator: rgb(18, 183, 0);   /* light beige */
+  --c-inhaler:    rgb(134, 206, 255);   /* dark red   */
 }
 
 body {

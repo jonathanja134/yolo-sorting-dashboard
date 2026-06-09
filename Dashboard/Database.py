@@ -106,19 +106,21 @@ def init_db():
 
 def get_conveyors():
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("SELECT id, running, speed FROM conveyors ORDER BY id").fetchall()
+    rows = conn.execute("SELECT id, running FROM conveyors ORDER BY id").fetchall()
     conn.close()
-    return {r[0]: {"id": r[0], "running": bool(r[1]), "speed": r[2]} for r in rows}
+    return {
+        r[0]: {
+            "id": r[0],
+            "running": bool(r[1])
+        }
+        for r in rows
+    }
 
-def save_conveyor(conv_id, running, speed):
+def save_conveyor(conv_id, running):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("UPDATE conveyors SET running=?, speed=? WHERE id=?",
-                 (1 if running else 0, speed, conv_id))
+    conn.execute("UPDATE conveyors SET running=? WHERE id=?",(1 if running else 0, conv_id))
     conn.commit()
     conn.close()
-    log_event("conveyor", f"Conveyor {conv_id} {'started' if running else 'stopped'}",
-              f"speed={speed} m/s")
-
 
 # ══════════════════════════════════════════
 #  SERVOS
@@ -132,8 +134,7 @@ def get_servos():
 
 def save_servo(servo_type, active):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("UPDATE servos SET active=? WHERE type=?",
-                 (1 if active else 0, servo_type))
+    conn.execute("UPDATE servos SET active=? WHERE type=?",(1 if active else 0, servo_type))
     conn.commit()
     conn.close()
     log_event("servo", f"Servo {servo_type} {'activated' if active else 'deactivated'}")
@@ -168,6 +169,7 @@ def get_unrecognized():
     row = conn.execute("SELECT value FROM stats WHERE key='unrecognized'").fetchone()
     conn.close()
     return int(row[0]) if row else 0
+
 
 def increment_unrecognized():
     conn = sqlite3.connect(DB_PATH)
@@ -210,44 +212,33 @@ def record_sensor1_trigger(ts=None):
     return triggers
 
 
-def get_sensor1_triggers():
+def get_sorted_device(limit=10):
     conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT value FROM stats WHERE key='sensor1_triggers'").fetchone()
+    rows = conn.execute(""" SELECT timestamp FROM 
+                            events WHERE key='detection' 
+                            ORDER BY timestamp DESC LIMIT ? """, (limit,)).fetchall()
     conn.close()
-    if not row:
-        return []
-    try:
-        return [float(t) for t in json.loads(row[0])]
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return []
+    return sorted([float(r[0]) for r in rows])
 
-
-def compute_sorting_rate(triggers=None):
-    """
-    Sorting rate (objects/hour) from sensor-1 trigger spacing.
-    Example: 2 triggers in 60 s → (2/60)*3600 = 120/h.
-    Needs at least 2 triggers; uses span from oldest to newest in the window.
-    """
-    if triggers is None:
-        triggers = get_sensor1_triggers()
+def compute_sorting_rate(limit=10):
+    "Sorting rate (objects/hour) based on recent detection timestamps."
+    triggers = get_sorted_device(limit)
     if len(triggers) < 2:
         return 0
     window = triggers[-1] - triggers[0]
     if window < 1.0:
         window = 1.0
-    return round((len(triggers) / window) * 60)
-
+    return round((len(triggers) / window) * 3600)
 
 # ══════════════════════════════════════════
 #  EVENT HISTORY
 # ══════════════════════════════════════════
 
 def log_event(category, action, details=None):
+
     conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO events (timestamp, category, action, details) VALUES (?, ?, ?, ?)",
-        (datetime.now().isoformat(timespec='seconds'), category, action, details)
-    )
+    conn.execute("INSERT INTO events (timestamp, category, action, details) VALUES (?, ?, ?, ?)",
+                (datetime.now().isoformat(timespec='seconds'), category, action, details))
     conn.commit()
     conn.close()
 
@@ -262,8 +253,7 @@ def get_recent_events(limit=50, categories=None):
         rows = conn.execute(
             f"SELECT timestamp, category, action, details FROM events "
             f"WHERE category IN ({placeholders}) ORDER BY id DESC LIMIT ?",
-            (*categories, limit)
-        ).fetchall()
+            (*categories, limit)).fetchall()
     else:
         rows = conn.execute(
             "SELECT timestamp, category, action, details FROM events ORDER BY id DESC LIMIT ?",

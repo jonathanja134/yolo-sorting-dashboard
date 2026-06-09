@@ -4,9 +4,7 @@
 // ══════════════════════════════════════════
 
 // ── CLOCK ──
-function updateClock() {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');
-}
+function updateClock() {document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');}
 setInterval(updateClock, 1000);
 updateClock();
 
@@ -14,11 +12,11 @@ updateClock();
 const CATEGORIES = ['canister', 'chemical', 'applicator', 'inhaler'];
 
 const CAT_COLORS = {
-  applicator:   '#3b82f6',   // blue
-  inhaler:      '#a855f7',   // purple
-  chemical:     '#0ea5e9',   // sky blue
-  canister:     '#f59e0b',   // amber
-  unrecognized: '#9aa3b8',   // grey
+  applicator:   '#00b700',   // blue
+  inhaler:      '#a2e1ef',   // purple
+  chemical:     '#76230c',   // sky blue
+  canister:     '#696969',   // amber
+  unrecognized: '#1c1c1c',   // grey
 };
 
 

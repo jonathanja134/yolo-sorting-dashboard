@@ -30,6 +30,13 @@ bbox_colors = [
 (42, 42, 165),    # brown
 ]
 
+DEVICE_COLORS = {
+    "canister":   (211, 211, 211),# light blue
+    "chemical":   (42, 42, 165), # dark blue
+    "applicator": (230, 216, 173),# light blue
+    "inhaler":    (139, 0, 0),
+}
+
 # ── MAPPINGS ───────────────────────────────────────────────
 
 LABEL_TO_CATEGORY = {
@@ -78,7 +85,7 @@ gap_limit = 20
 # ── SERIAL SETTINGS ────────────────────────────────────────
 BAUD = 115200
 PORT = "/dev/ttyACM0"
-SOCKET_PORT = 5000
+SOCKET_PORT = 5500
 
 # ── CONVEYOR PIN MAPPING ──────────────────────────────────
 # Each conveyor has its own Arduino pin

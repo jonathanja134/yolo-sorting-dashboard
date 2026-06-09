@@ -6,7 +6,7 @@
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 const int   EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
-const int   SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
+const int   SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_12, S_MOTOR_13, S_MOTOR_14, S_MOTOR_15 };
 const char* CATEGORY_NAMES[NB_SERVOS]   = { "canister", "chemical", "applicator", "inhaler" };
 
 int  servoPos[NB_SERVOS];
@@ -15,8 +15,6 @@ bool servoOpen[NB_SERVOS]   = {};
 bool servoWired[NB_SERVOS]  = {};
 bool motorRunning = false;
 bool inActuation  = false;
-bool MotorFeedback = false;
-bool FeedbackRead = false;
 
 bool systemRunning      = false;
 bool eStopActive        = false;
@@ -68,36 +66,6 @@ void updateOrangeLamp() {
 }
 
 // -- READ MOTOR FEEDBACK (if wired) ───────────────────────────────────
-void readMotorFeedback(String action = "") {
-  MotorFeedback = (digitalRead(MotorFb) == HIGH);
-
-  if (MotorFeedback) {
-    if (!eStopActive && action == "FORWARD") {
-      motorRunning = true;
-      systemRunning = true;
-      Serial.println("ACK:MOTOR:FORWARD");
-      FeedbackRead = true;
-    }
-    else if (action == "STOP") {
-      motorRunning = false;
-      systemRunning = false;
-      Serial.println("ERR:MOTOR:FEEDBACK_MISMATCH");
-    }
-  }
-  else {
-    if (!eStopActive && action == "FORWARD") {
-      motorRunning = true;
-      systemRunning = true;
-      Serial.println("ERR:MOTOR:FEEDBACK_MISMATCH");
-    }
-    else if (action == "STOP") {
-      motorRunning = false;
-      systemRunning = false;
-      Serial.println("ACK:MOTOR:STOP");
-      FeedbackRead = true;
-    }
-  }
-}
 // ── DOOR SWITCH UPDATE ────────────────────────────────────────
 // Called every loop. If either door opens → cut UV immediately.
 // If both doors close again → restore UV only if systemRunning
@@ -199,32 +167,22 @@ void readEStop() {
 
 // ── MOTOR CONTROL ────────────────────────────────────────────
 void startSystemMotor() {
-  
   if (eStopActive) {
     Serial.println("ERR:ESTOP:ACTIVE");
     return;
   }
+
   digitalWrite(MotorFw, HIGH);
-  unsigned long t0 = millis();
-  while (millis() - t0 < 500) {
-    readMotorFeedback("FORWARD");
-    readEStop();
-    if (FeedbackRead == true) {
-      FeedbackRead = false;
-      break;
-    }
-    if (eStopActive) break;
+  systemRunning = true;
+  motorRunning  = true;
+
+  if (door1Closed && door2Closed) {
+    digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
+  } else {
+    digitalWrite(UV_LAMP_PIN, LOW);
+    Serial.println("ACK:UV:OFF:DOOR_OPEN");
   }
-  if (!eStopActive) {
-    systemRunning = true;
-    motorRunning  = true;
-    if (door1Closed && door2Closed) {
-      digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
-    } else {
-      digitalWrite(UV_LAMP_PIN, LOW);
-      Serial.println("ACK:UV:OFF:DOOR_OPEN");
-    }
-  }
+
   updateOrangeLamp();
 }
 
@@ -232,17 +190,7 @@ void stopSystemMotor(bool closeServos) {
   systemRunning = false;
   motorRunning = false;
   digitalWrite(MotorFw, LOW);
-  unsigned long t0 = millis();
-  while (millis() - t0 < 500) {
-    readMotorFeedback("STOP");
-    readEStop();
-    if (FeedbackRead == true) {
-      FeedbackRead = false;
-      break;
-    }
-    if (eStopActive) break;
-  }
-  // Force UV off when system stops, button is also blocked from now on
+
   uvOn = false;
   digitalWrite(UV_LAMP_PIN, LOW);
   Serial.println("ACK:UV:OFF");
@@ -253,6 +201,7 @@ void stopSystemMotor(bool closeServos) {
       servoOpen[i] = false;
     }
   }
+
   updateOrangeLamp();
 }
 
@@ -293,7 +242,6 @@ void setup() {
   pinMode(POS_SENSOR_1, INPUT);
 
   pinMode(MotorFw,    OUTPUT); digitalWrite(MotorFw,    LOW);
-  pinMode(MotorFb,    INPUT);
 
   pinMode(ORANGE_LAMP_PIN, OUTPUT); digitalWrite(ORANGE_LAMP_PIN, HIGH);
   pinMode(UV_LAMP_PIN,     OUTPUT); digitalWrite(UV_LAMP_PIN,     LOW);
