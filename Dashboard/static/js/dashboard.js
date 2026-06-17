@@ -9,7 +9,7 @@ setInterval(updateClock, 1000);
 updateClock();
 
 // ── CATEGORY CONFIG ──
-const CATEGORIES = ['canister', 'chemical', 'applicator', 'inhaler'];
+const CATEGORIES = ['canister', 'chemical', 'applicator', 'inhaler','unsorted'];
 
 const CAT_COLORS = {
   applicator:   '#00b700',   // blue
@@ -17,6 +17,7 @@ const CAT_COLORS = {
   chemical:     '#76230c',   // sky blue
   canister:     '#696969',   // amber
   unrecognized: '#1c1c1c',   // grey
+  unsorted:     '#ef4444',   // red
 };
 
 
@@ -26,9 +27,9 @@ const pieCtx = document.getElementById('pieChart').getContext('2d');
 const pieChart = new Chart(pieCtx, {
   type: 'doughnut',
   data: {
-    labels: ['Canister', 'Chemical', 'Applicator', 'Inhaler'],
+    labels: ['Canister', 'Chemical', 'Applicator', 'Inhaler', 'Unsorted'],
     datasets: [{
-      data: [1, 1, 1, 1],
+      data: [1, 1, 1, 1, 1],
       backgroundColor: CATEGORIES.map(c => CAT_COLORS[c]),
       borderWidth: 0,
       hoverOffset: 6
@@ -49,7 +50,7 @@ const pieChart = new Chart(pieCtx, {
 });
 
 // ── LOCAL STATE ──
-const counts = { canister: 0, chemical: 0, applicator: 0, inhaler: 0 };
+const counts = { canister: 0, chemical: 0, applicator: 0, inhaler: 0, unsorted: 0 };
 const conveyorState = { 1: 'stopped', 2: 'stopped' };
 
 function normalizeConveyorId(id) {
@@ -84,6 +85,11 @@ function updateCounts(data) {
 
   if (data.unrecognized !== undefined) {
     document.getElementById('unrecognized-rate-value').textContent = data.unrecognized;
+  }
+  const unsortedCount = c.unsorted !== undefined ? c.unsorted : data.unsorted;
+  if (unsortedCount !== undefined) {
+    const unsortedEl = document.getElementById('cnt-unsorted');
+    if (unsortedEl) unsortedEl.textContent = unsortedCount;
   }
   if (data.rate !== undefined) {
     document.getElementById('sorting-rate').textContent = data.rate;
@@ -505,6 +511,13 @@ socket.on('new_detection',      (data) => {
 socket.on('update_sensor',      (data) => {
   if (debugEnabled) appendLogRow(new Date().toISOString(), 'sensor',
     `Sensor ${data.id} ${data.triggered ? 'TRIGGERED' : 'clear'}`, '');
+});
+socket.on('unsorted_object_detected', (data) => {
+  if (debugEnabled) appendLogRow(new Date().toISOString(), 'sensor',
+    `Unsorted object detected`, `type=${data.type}`);
+  if (data.count !== undefined) {
+    updateCounts({ unsorted: data.count });
+  }
 });
 
 // ══════════════════════════════════════════

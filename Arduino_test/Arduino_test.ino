@@ -2,6 +2,7 @@
 #include <EEPROM.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+#include <string.h>
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
@@ -71,8 +72,8 @@ void updateOrangeLamp() {
 // If both doors close again → restore UV only if systemRunning
 // and uvOn are both true (button state is preserved).
 void readDoorSwitches() {
-  bool d1 = digitalRead(DOOR_SWITCH_1), d2 = digitalRead(DOOR_SWITCH_2);  // HIGH = closed, LOW = open
-  bool newDoor1Closed = (d1 == HIGH)  , newDoor2Closed = (d2 == HIGH); 
+  bool d1 = digitalRead(DOOR_SWITCH_1), d2 = digitalRead(DOOR_SWITCH_2);  // LOW = closed, HIGH = open
+  bool newDoor1Closed = (d1 == LOW)  , newDoor2Closed = (d2 == LOW); 
 
   bool stateChanged = (newDoor1Closed != door1Closed) || (newDoor2Closed != door2Closed);
 
@@ -112,7 +113,9 @@ void readUVButton() {
         digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
         Serial.println(uvOn ? "ACK:UV:ON" : "ACK:UV:OFF");
       }
-      // If the system is not running, the pressed button is ignored
+      else if (currentUVButtonState == LOW && lastUVButtonState == HIGH) {
+        Serial.println("ACK:UV:BLOCKED");
+      }
     }
     lastUVButtonState = currentUVButtonState;
   }
@@ -143,8 +146,10 @@ void readEStop() {
     eStopActive   = true;
     systemRunning = false;
     motorRunning  = false;
+    uvOn = false;
 
     digitalWrite(MotorFw,    LOW);
+    digitalWrite(UV_LAMP_PIN, LOW);
 
     // Close all servos immediately, even mid-actuation
     inActuation = false;
@@ -294,7 +299,7 @@ void updateSensor(Sensor &s) {
   if (reading == HIGH && s.state == LOW) {// Rising edge → object detected by sensor
     s.state     = HIGH;
     s.triggered = true;
-    Serial.print("SENSOR:"); Serial.print(s.id); Serial.println(":TRIGGERED"); Serial.println("SENSOR: OBJECT_NOT_DETECTED");
+    Serial.println("SENSOR:END:OBJECT_NOT_DETECTED");
 
   } else if (reading == LOW && s.state == HIGH) { // Falling edge → object left the sensor
     s.state     = LOW;
@@ -388,9 +393,12 @@ void actuateServo(int idx) {
 // Wait for the sensor trigger or timeout to check if the object was detected in front of the door.
 // During this time, no new actuation can start to avoid multiple triggers from the same object
 // and to let the servo close properly.
+bool longZone = (
+  strcmp(CATEGORY_NAMES[idx], "chemical") == 0 ||
+  strcmp(CATEGORY_NAMES[idx], "inhaler") == 0);
 
- const unsigned long TIMEOUT = (idx < 2) ? TIMEOUT_1 : TIMEOUT_2; // use different timeouts for the 2 zones since the 2nd zone is further and the object may take more time to reach it
-  while (millis() - start < TIMEOUT) {
+ const unsigned long TIMEOUT = longZone ? TIMEOUT_2 : TIMEOUT_1; // use different timeouts for the 2 zones since the 2nd zone is further and the object may take more time to reach it
+ while (millis() - start < TIMEOUT) {
     readEStop();
     if (eStopActive){
       detected = true;

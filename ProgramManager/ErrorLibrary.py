@@ -6,7 +6,7 @@ SERIAL_UNRECOGNIZED_LINE     | MOTOR_FEEDBACK_MISMATCH       | SERVO_NOT_WIRED
 UNSORTED                     | ARDUINO_SYSTEM_IS_NOT_RUNNING | ARDUINO_SYSTEM_UNKNOWN_CMD      
 DATABASE_CONNECTION_FAILED   | SOCKET_DISCONNECTED           | CONTROL_CONVEYOR_BLOCKED
 ARDUINO_PULSE_OUT_OF_RANGE   | ESTOP_ACTIVE                  | ESTOP_CLEARED                
-UNKNOWN_ERROR                
+UNKNOWN_ERROR                | UV_BLOCKED
 """
 
 
@@ -34,7 +34,7 @@ ERROR_CATALOG = {
     # ─── SERIAL / CONNECTION ────────────────────────────────────────────────────
     "SERIAL_NOT_CONNECTED": {
         "code": "SERIAL_001",
-        "severity": ErrorSeverity.CRITICAL,
+        "severity": ErrorSeverity.ERROR,
         "source": ErrorSource.SERIAL,
         "title": "Serial Port Not Connected",
         "message": "Arduino is not connected. Check USB cable and port configuration.",
@@ -171,6 +171,14 @@ ERROR_CATALOG = {
         "title": "Conveyor Control Blocked",
         "message": "Cannot control conveyor: Arduino is disconnected.",
         "action": "Reconnect Arduino before starting or stopping conveyors.",
+    },
+    "UV_BLOCKED": {
+        "code": "SYSTEM_006",
+        "severity": ErrorSeverity.WARNING,
+        "source": ErrorSource.SYSTEM,
+        "title": "UV Light Blocked",
+        "message": "UV light is blocked .",
+        "action": "Ensure UV door are closed and system is running",
     },
     "ESTOP_ACTIVE": {
         "code": "SYSTEM_004",

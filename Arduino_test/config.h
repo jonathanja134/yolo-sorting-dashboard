@@ -20,8 +20,8 @@
 #define PULLDOWN_R  11
 
 // ── DOOR SWITCHES ────────────────────────────────────────────
-#define DOOR_SWITCH_1  14   // moved away from ESTOP_PIN
-#define DOOR_SWITCH_2  13   
+#define DOOR_SWITCH_1  18   
+#define DOOR_SWITCH_2  19   
 
 // ── BUTTONS ──────────────────────────────────────────────────
 #define START_STOP_PIN      8
@@ -31,7 +31,7 @@
 
 // ── LAMPS ────────────────────────────────────────────────────
 #define ORANGE_LAMP_PIN  20   
-#define UV_LAMP_PIN       9
+#define UV_LAMP_PIN       2
 
 // ── SERVO POSITIONS ──────────────────────────────────────────
 #define SERVO_MIN              150
@@ -43,22 +43,22 @@
 #define SERVO_CHECK_MAX_PULSE  650
 
 // ── TIMING ───────────────────────────────────────────────────
-const unsigned long SERVO_OPEN_MS  = 500;  // Time to wait for a servo to open before checking the sensor
-const unsigned long TIMEOUT_1      = 1000; // Time to wait for the object to be detected by the sensor after opening the servo in the 1st zone (closer, so shorter timeout)
-const unsigned long TIMEOUT_2      = 4000; // Time to wait for the object to be detected by the sensor after opening the servo in the 2nd zone (further, so longer timeout)
-const unsigned long DEBOUNCE_MS    = 50;   // Debounce time for buttons and sensors to avoid multiple triggers from a single press or ob
+const unsigned long SERVO_OPEN_MS  = 2000;  // Time to wait for a servo to open before checking the sensor
+const unsigned long TIMEOUT_1      = 1500; // Time to wait for the object to be detected by the sensor after opening the servo in the 1st zone (closer, so shorter timeout)
+const unsigned long TIMEOUT_2      = 5500; // Time to wait for the object to be detected by the sensor after opening the servo in the 2nd zone (further, so longer timeout)
+const unsigned long DEBOUNCE_MS    = 500;   // Debounce time for buttons and sensors to avoid multiple triggers from a single press or ob
 
 //Pin map in 
 
+//UV_LAMP_PIN         2
 //UV_BUTTON_PIN       3   
 //POS_SENSOR_1        4
 //PULLDOWN_2          6
 //PULLDOWN_1          7
 //START_STOP_PIN      8
-//UV_LAMP_PIN         9
 //MotorFw             10
 //PULLDOWN_R          11
 //ESTOP_PIN           12  
-//DOOR_SWITCH_2       13  
-//DOOR_SWITCH_1       14
+//DOOR_SWITCH_2       18  
+//DOOR_SWITCH_1       19
 //ORANGE_LAMP_PIN     20 
