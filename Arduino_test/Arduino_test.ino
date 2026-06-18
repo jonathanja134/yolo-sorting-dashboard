@@ -89,9 +89,10 @@ void readDoorSwitches() {
     // At least one door open → force UV off immediately
     digitalWrite(UV_LAMP_PIN, LOW);
     Serial.println("ACK:UV:OFF:DOOR_OPEN");
-  } else {
+  } else if(bothClosed && uvOn ) {
     // Both doors closed → restore UV only if system running and button was ON
     digitalWrite(UV_LAMP_PIN, (systemRunning && uvOn) ? HIGH : LOW);
+    Serial.println("ACK:UV:ON:DOOR_CLOSED");
   }
 }
 

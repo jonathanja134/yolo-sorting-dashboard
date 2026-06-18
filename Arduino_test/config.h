@@ -26,7 +26,7 @@
 // ── BUTTONS ──────────────────────────────────────────────────
 #define START_STOP_PIN      8
 #define BUTTON_DEBOUNCE_MS 50
-#define ESTOP_PIN          12   
+#define ESTOP_PIN          25   
 #define UV_BUTTON_PIN       3   
 
 // ── LAMPS ────────────────────────────────────────────────────

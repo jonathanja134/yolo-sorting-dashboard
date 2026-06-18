@@ -117,8 +117,14 @@ print("~ 2 Model loaded OK")
 
 # ── Camera 
 picam = Picamera2()
-picam.configure(picam.create_video_configuration(main={"size": (input_size, input_size), "format": "RGB888"}))
-picam.set_controls({"AeEnable": False,"AnalogueGain": 3,"ExposureTime": 18000,}) # camera ISP settings
+picam.configure(picam.create_video_configuration(
+    main={"size": (input_size, input_size), "format": "RGB888"}
+))
+picam.set_controls({
+    "AeEnable": False,          # disable auto-exposure
+    "AnalogueGain": 3,        # ISO-equivalent: 1.0 = ISO 100, 8.0 ≈ ISO 800
+    "ExposureTime": 18000,      # microseconds (10ms here — adjust to your lighting)
+})
 picam.start()
 print("~ 3 Camera OK")
 

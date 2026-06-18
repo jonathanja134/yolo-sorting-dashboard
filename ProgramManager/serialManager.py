@@ -170,18 +170,24 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 continue
 
             # UV ack
-            if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "UV":
-                if parts[2] == "ON" or parts[2] == "OFF":
-                    uv_on = parts[2] == "ON"
-                    error_mgr.resolve_error("UV_BLOCKED")
-                    if lamp_state.get('blue') != uv_on:
-                        lamp_state['blue'] = uv_on
-                        emit_fn('lamp_update', lamp_state)
-                    continue
-                if parts[2] == "BLOCKED":
-                    error_mgr.raise_error("UV_BLOCKED")
-                    continue
+            if len(parts) >= 3 and parts[0] == "ACK" and parts[1] == "UV":
+                state = parts[2]
+                reason = parts[3] if len(parts) > 3 else None
 
+                if state in ("ON", "OFF"):
+                    uv_on = (state == "ON")
+                    error_mgr.resolve_error("UV_BLOCKED")
+                    if lamp_state.get("blue") != uv_on:
+                        lamp_state["blue"] = uv_on
+                        emit_fn("lamp_update", lamp_state)
+
+                    if reason:
+                        print(f"UV {state}: {reason}")
+                    continue
+                
+                elif state == "BLOCKED":
+                    error_mgr.raise_error("UV_BLOCKED",{"reason": reason} if reason else None)
+                    continue
             # servo events
             if len(parts) >= 3 and parts[0] == "SERVO":
                 try:
