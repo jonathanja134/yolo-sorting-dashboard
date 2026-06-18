@@ -121,12 +121,11 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
             if len(parts) == 3 and parts[0] == "SENSOR":
                 sensor_id = parts[1]
                 event     = parts[2]
-                if sensor_id == "RESET" and event == "TRIGGERED":
-                    buffer_manager.handle_reset()
-                    continue
-                emit_fn("sensor_update", {
-                    "id":           f"sensor_{sensor_id}",
-                    "triggered":    event == "TRIGGERED",
+                if sensor_id == "END" and event == "OBJECT_NOT_DETECTED":
+                    emit_fn("unsorted_object_detected", {"type": "end_sensor"})
+                    emit_fn("sensor_update", {
+                        "id":           f"sensor_{sensor_id}",
+                        "triggered":    event == "TRIGGERED",
                 })
                 continue
 
@@ -166,11 +165,16 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
 
             # UV ack
             if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "UV":
-                uv_on = parts[2] == "ON"
-                if lamp_state.get('blue') != uv_on:
-                    lamp_state['blue'] = uv_on
-                    emit_fn('lamp_update', lamp_state)
-                continue
+                if parts[2] == "ON" or parts[2] == "OFF":
+                    uv_on = parts[2] == "ON"
+                    error_mgr.resolve_error("UV_BLOCKED")
+                    if lamp_state.get('blue') != uv_on:
+                        lamp_state['blue'] = uv_on
+                        emit_fn('lamp_update', lamp_state)
+                    continue
+                if parts[2] == "BLOCKED":
+                    error_mgr.raise_error("UV_BLOCKED")
+                    continue
 
             # servo events
             if len(parts) >= 3 and parts[0] == "SERVO":
@@ -362,12 +366,13 @@ class SerialManager:
                 self.ser = None
             self.available = False
 
-    def _open_port(self, port: str) -> bool:
+    def _open_port(self, port: str, emit_fn=None) -> bool:
         """
         Open *port*, wait for the Arduino to boot, flush stale RX bytes, and
         update internal state.  Returns True on success.
         Called with self._connect_lock already held.
         """
+        error_mgr = get_error_manager(emit_fn)
         try:
             ser = serial.Serial(port, self.baud, timeout=0.05)
             time.sleep(self._BOOT_DELAY)   # wait for Arduino bootloader
@@ -376,6 +381,7 @@ class SerialManager:
             self.port      = port
             self.available = True
             print(f"[SERIAL] Connected on {port}")
+            error_mgr.resolve_error("SERIAL_NOT_CONNECTED")
             return True
         except Exception as e:
             print(f"[SERIAL WARNING] Could not open {port}: {e}")
@@ -434,6 +440,7 @@ class SerialManager:
             # Auto-detect
             detected = self.find_arduino_port()
             if detected and self._open_port(detected):
+                error_mgr.resolve_error("SERIAL_NOT_CONNECTED")
                 return
             
             self.available = False
@@ -441,6 +448,7 @@ class SerialManager:
             if detected:
                 # device exists but cannot be opened
                 if error_mgr:
+                    error_mgr.resolve_error("SERIAL_NOT_CONNECTED")
                     error_mgr.raise_error("SERIAL_DEVICE_UNREACHABLE", {
                         "port": detected,
                         "reason": "Device detected but serial open failed",

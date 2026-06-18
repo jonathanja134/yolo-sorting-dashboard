@@ -67,22 +67,19 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (2, 0, 1.2)")
     c.execute("INSERT OR IGNORE INTO conveyors (id, running, speed) VALUES (3, 0, 1.0)")
 
-    # Seed all 4 categories
+    # Seed all 4 categories and unsorted counter
     for t in CATEGORIES:
         c.execute("INSERT OR IGNORE INTO servos (type, active) VALUES (?, 0)", (t,))
         c.execute("INSERT OR IGNORE INTO counts (type, value) VALUES (?, 0)", (t,))
+    c.execute("INSERT OR IGNORE INTO counts (type, value) VALUES ('unsorted', 0)")
 
     # Migrate legacy 'sharps' rows to the new 'chemical' category.
     c.execute("INSERT OR IGNORE INTO servos (type, active) SELECT 'chemical', active FROM servos WHERE type = 'sharps'")
-    c.execute(
-        "UPDATE servos SET active = 1 WHERE type = 'chemical' AND EXISTS (SELECT 1 FROM servos WHERE type = 'sharps' AND active = 1)"
-    )
+    c.execute("UPDATE servos SET active = 1 WHERE type = 'chemical' AND EXISTS (SELECT 1 FROM servos WHERE type = 'sharps' AND active = 1)")
     c.execute("DELETE FROM servos WHERE type = 'sharps'")
 
     c.execute("INSERT OR IGNORE INTO counts (type, value) SELECT 'chemical', value FROM counts WHERE type = 'sharps'")
-    c.execute(
-        "UPDATE counts SET value = value + (SELECT value FROM counts WHERE type = 'sharps') WHERE type = 'chemical' AND EXISTS (SELECT 1 FROM counts WHERE type = 'sharps')"
-    )
+    c.execute("UPDATE counts SET value = value + (SELECT value FROM counts WHERE type = 'sharps') WHERE type = 'chemical' AND EXISTS (SELECT 1 FROM counts WHERE type = 'sharps')")
     c.execute("DELETE FROM counts WHERE type = 'sharps'")
 
     # Remove old 'hazardous' rows if they exist from a previous DB schema
@@ -160,9 +157,19 @@ def get_counts():
 
 def increment_count(obj_type):
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT OR IGNORE INTO counts (type, value) VALUES (?, 0)", (obj_type,))
     conn.execute("UPDATE counts SET value = value + 1 WHERE type=?", (obj_type,))
     conn.commit()
     conn.close()
+
+def increment_unsorted():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT OR IGNORE INTO counts (type, value) VALUES ('unsorted', 0)")
+    conn.execute("UPDATE counts SET value = value + 1 WHERE type='unsorted'")
+    conn.commit()
+    row = conn.execute("SELECT value FROM counts WHERE type='unsorted'").fetchone()
+    conn.close()
+    return int(row[0]) if row else 0
 
 def get_unrecognized():
     conn = sqlite3.connect(DB_PATH)
@@ -214,11 +221,18 @@ def record_sensor1_trigger(ts=None):
 
 def get_sorted_device(limit=10):
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(""" SELECT timestamp FROM 
-                            events WHERE key='detection' 
-                            ORDER BY timestamp DESC LIMIT ? """, (limit,)).fetchall()
+
+    rows = conn.execute("""
+        SELECT timestamp
+        FROM events
+        WHERE category='detection'
+        ORDER BY timestamp DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+
     conn.close()
-    return sorted([float(r[0]) for r in rows])
+
+    return sorted(datetime.fromisoformat(r[0]).timestamp()for r in rows)
 
 def compute_sorting_rate(limit=10):
     "Sorting rate (objects/hour) based on recent detection timestamps."

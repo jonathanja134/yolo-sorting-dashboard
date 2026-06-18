@@ -23,6 +23,7 @@
   --c-chemical:   rgb(119, 46, 0);   /* dark blue  */
   --c-applicator: rgb(18, 183, 0);   /* light beige */
   --c-inhaler:    rgb(134, 206, 255);   /* dark red   */
+  --c-unsorted:   rgb(220, 38, 38);   /* red */
 }
 
 body {

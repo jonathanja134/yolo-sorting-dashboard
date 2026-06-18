@@ -36,7 +36,7 @@ from flask_socketio import SocketIO
 from ProgramManager.config import normalize_conveyor_db_id
 from Dashboard.Database import ( 
     init_db,get_conveyors, save_conveyor,get_servos,
-    save_servo, reset_all_servos,get_counts,increment_count,
+    save_servo, reset_all_servos,get_counts,increment_count,increment_unsorted,
     get_unrecognized, increment_unrecognized,get_recent_events,
     get_session_start,record_sensor1_trigger, compute_sorting_rate,log_event)
 from ProgramManager.ErrorManager import get_error_manager
@@ -106,7 +106,7 @@ def is_arduino_connected():
 def _current_warning():
     """Banner text for HTTP initial load (matches live socket behaviour)."""
     if not serial_manager.available:
-        raise _err_mgr().raise_error("SERIAL_NOT_CONNECTED")
+        return _err_mgr().raise_error("SERIAL_NOT_CONNECTED")
     else:
         return {"message": NOMINAL_WARNING, "is_error": False}
 
@@ -349,6 +349,17 @@ def handle_sensor_update(data):
         "triggered":   triggered,
     })
 
+@socketio.on("unsorted_object_detected")
+def handle_unsorted_object_detected(data):
+    count = increment_unsorted()
+    log_event("sensor",
+              "Unsorted object detected",
+              f"type={data.get('type')}" if data else None)
+    socketio.emit("unsorted_object_detected", {
+        "type":  data.get('type') if data else None,
+        "count": count,
+    })
+    _emit_counts()
 
 # ── Buffer debug state  (Pi -> server -> browser, relay only) ──────────────────
 
@@ -432,7 +443,7 @@ def handle_error_resolved(data):
 
 
 @socketio.on("connect")
-def on_connect():
+def on_connect(auth=None):
     conveyors = get_conveyors()
     servos    = get_servos()
 
