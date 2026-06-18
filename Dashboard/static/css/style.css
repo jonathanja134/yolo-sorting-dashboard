@@ -79,30 +79,12 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .header-time { font-family: 'DM Mono', monospace; font-size: 0.8rem; color: var(--text-secondary); }
 
 /* ── DEBUG TOGGLE ── */
-.debug-toggle-wrap {
-  display: flex; align-items: center; gap: 0.5rem;
-  font-size: 0.75rem; font-weight: 500;
-  color: var(--text-secondary); font-family: 'DM Mono', monospace;
-  cursor: pointer; user-select: none;
+.debug-control-btn{
+  display: flex; align-items: center; gap: 20px;
 }
-
-.toggle-switch { position: relative; width: 34px; height: 18px; }
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.toggle-slider {
-  position: absolute; inset: 0;
-  background: #e4e8ef; border-radius: 18px;
-  transition: background 0.2s; cursor: pointer;
+.debug-control-header{
+  display:flex;align-items:center;justify-content:space-between;
 }
-.toggle-slider::before {
-  content: '';
-  position: absolute; left: 3px; top: 3px;
-  width: 12px; height: 12px;
-  background: white; border-radius: 50%;
-  transition: transform 0.2s;
-}
-.toggle-switch input:checked + .toggle-slider            { background: var(--blue); }
-.toggle-switch input:checked + .toggle-slider::before   { transform: translateX(16px); }
-
 /* ── DASHBOARD GRID ── */
 .dashboard {
   padding: 1.5rem 2rem;
@@ -282,7 +264,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
    ══════════════════════════════════════════ */
 
 .debug-row { width: 100%; }
-#debug-panel { display: none; }
+#debug-panel { display: block; }
 
 .debug-panel-inner {
   display: grid;
@@ -443,6 +425,8 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   box-sizing: border-box;
 }
 
+/* fullscreen overlay styles removed */
+
 .log-sidebar-card {
   height: 100%;
   display: flex;
@@ -481,12 +465,12 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 /* ── Log filter bar ─────────────────────────────── */
 .log-filter-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 5px;
-  margin-bottom: 8px;
+  margin-bottom: 20px;
 }
 .log-filter-btn {
-  font-size: 0.62rem;
+  font-size: 0.52rem;
   font-family: 'DM Mono', monospace;
   padding: 3px 9px;
   border-radius: 6px;

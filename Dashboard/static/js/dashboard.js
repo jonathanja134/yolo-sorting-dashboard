@@ -303,7 +303,6 @@ function showUnrecognized(message) {
 // ══════════════════════════════════════════
 //  DEBUG PANEL
 // ══════════════════════════════════════════
-
 let debugEnabled = false;
 
 function toggleDebug() {
@@ -311,15 +310,16 @@ function toggleDebug() {
   const panel    = document.getElementById('debug-panel');
   const logPanel = document.getElementById('debug-log-panel');
   const label    = document.getElementById('debug-toggle-label');
-  panel.style.display    = debugEnabled ? 'block' : 'none';
-  logPanel.style.display = debugEnabled ? 'block' : 'none';
-  label.textContent      = debugEnabled ? 'Debug ON' : 'Debug OFF';
+  if (panel) panel.style.display    = debugEnabled ? 'block' : 'none';
+  if (logPanel) logPanel.style.display = debugEnabled ? 'block' : 'none';
+  if (label) label.textContent      = debugEnabled ? 'Debug ON' : 'Debug OFF';
 }
 
-document.getElementById('debug-toggle').addEventListener('change', toggleDebug);
+const dbgToggle = document.getElementById('debug-toggle');
+if (dbgToggle) dbgToggle.addEventListener('change', toggleDebug);
 
 function renderDebugPanel(data) {
-  if (!debugEnabled) return;
+  // debugEnabled is always true — panel is visible by default
 
   const statusEl = document.getElementById('dbg-status');
   if (data.committed) {

@@ -17,16 +17,7 @@
     <h1>Sorting Control Dashboard</h1>
   </div>
   <div class="header-right">
-    <div class="debug-toggle-wrap">
-      <label class="toggle-switch">
-        <input type="checkbox" id="debug-toggle"/>
-        <span class="toggle-slider"></span>
-      </label>
-      <span id="debug-toggle-label">Debug OFF</span>
-    </div>
-    <div class="live-badge">
-      <span class="live-dot"></span>
-      LIVE
+    <div class="debug-controls">
     </div>
     <div class="header-time" id="clock">--:--:--</div>
   </div>
@@ -316,11 +307,13 @@
 </div><!-- end .dashboard-main -->
 
 <!-- ── SIDEBAR: Event Log ── -->
-<div class="dashboard-sidebar" id="debug-log-panel" style="display:none;">
+<div class="dashboard-sidebar" id="debug-log-panel">
   <div class="card log-sidebar-card">
-    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="card-title debug-control-header">
       <span>Event Log</span>
-      <button onclick="clearLogDisplay()" style="font-size:0.65rem;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;">Clear</button>
+      <div class="debug-control-btn">
+        <button onclick="clearLogDisplay()" style="font-size:0.65rem;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;">Clear</button>
+      </div>
     </div>
 
     <!-- Filter bar -->
