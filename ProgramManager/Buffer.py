@@ -91,8 +91,6 @@ class BufferManager:
     After every commit the buffer is wiped atomically (under lock, before the
     commit thread starts) so new detections never race into a stale window.
 
-    The _pin12_just_committed flag prevents the gap_limit fallback from re-committing
-    after a sensor trigger has already sent the data to the database.
     """
 
     def __init__(
@@ -116,7 +114,7 @@ class BufferManager:
 
         # Rule 4: set True after a pin12 commit; cleared when the gap signals
         # the object has left so the next pin12 event is treated as new.
-        self._pin12_just_committed = False
+        self._Already_committed = False
 
     # ── Public API (called from yolo_reader.py) ────────────────────────────────
 
@@ -136,7 +134,7 @@ class BufferManager:
         Record that this frame had no detection above threshold.
 
         Normal behaviour: commits if gap_limit is reached and votes exist.
-        Post-pin12 behaviour (rule 4): if _pin12_just_committed is set, the
+        Post-pin12 behaviour (rule 4): if _Already_committed is set, the
         gap signals the object has left — clear the flag and wipe without
         committing, so the next arrival starts a fresh event.
         """
@@ -146,12 +144,12 @@ class BufferManager:
             gap = self._buf.gap_counter
 
             if gap >= self._gap_limit and self._buf.frame_count > 0:
-                if self._pin12_just_committed:
+                if self._Already_committed:
                     # Object from the last pin12 event has now left — reset
                     # without committing (already counted once, rule 4).
                     print("[BUFFER] gap after pin12 commit — wiping without re-commit (rule 4)")
                     self._buf.reset()
-                    self._pin12_just_committed = False
+                    self._Already_committed = False
                 else:
                     snapshot = list(self._buf.votes)
                     self._buf.reset()
@@ -167,7 +165,7 @@ class BufferManager:
         Called on SENSOR:1:TRIGGERED (pin 12).
         Commits if >= min_frames accumulated, then wipes and keeps going.
         If below min_frames the buffer is still wiped (not enough data).
-        Sets _pin12_just_committed = True after a successful commit to prevent
+        Sets _Already_committed = True after a successful commit to prevent
         the gap_limit fallback from re-committing the same object.
         """
         snapshot   = None
@@ -177,7 +175,7 @@ class BufferManager:
             has_enough = self._buf.frame_count >= self._min_frames
             if has_enough:
                 snapshot = list(self._buf.votes)
-                self._pin12_just_committed = True   # rule 4: suppress further commits
+                self._Already_committed = True   # rule 4: suppress further commits
             self._buf.reset()
 
         if has_enough:
@@ -206,7 +204,7 @@ class BufferManager:
             if self._buf.frame_count > 0:
                 snapshot = list(self._buf.votes)
                 self._buf.reset()
-            self._pin12_just_committed = False
+            self._Already_committed = False
 
         if snapshot:
             self._trigger_commit(snapshot)
