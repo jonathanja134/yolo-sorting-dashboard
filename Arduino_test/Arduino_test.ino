@@ -16,6 +16,7 @@ bool servoOpen[NB_SERVOS]   = {};
 bool servoWired[NB_SERVOS]  = {};
 bool motorRunning = false;
 bool inActuation  = false;
+bool conveyor1Running = false;
 
 bool systemRunning      = false;
 bool eStopActive        = false;
@@ -150,6 +151,7 @@ void readEStop() {
 
     digitalWrite(MotorFw,    LOW);
     digitalWrite(UV_LAMP_PIN, LOW);
+    stopConveyor1();
 
     // Close all servos immediately, even mid-actuation
     inActuation = false;
@@ -195,9 +197,11 @@ void stopSystemMotor(bool closeServos) {
   systemRunning = false;
   motorRunning = false;
   digitalWrite(MotorFw, LOW);
+  stopConveyor1();
 
   uvOn = false;
   digitalWrite(UV_LAMP_PIN, LOW);
+  
   Serial.println("ACK:UV:OFF");
 
   if (closeServos) {
@@ -247,6 +251,8 @@ void setup() {
   pinMode(POS_SENSOR_1, INPUT);
 
   pinMode(MotorFw,    OUTPUT); digitalWrite(MotorFw,    LOW);
+  pinMode(CONVEYOR_1_PIN, OUTPUT); digitalWrite(CONVEYOR_1_PIN, LOW);
+
 
   pinMode(ORANGE_LAMP_PIN, OUTPUT); digitalWrite(ORANGE_LAMP_PIN, HIGH);
   pinMode(UV_LAMP_PIN,     OUTPUT); digitalWrite(UV_LAMP_PIN,     LOW);
@@ -311,6 +317,18 @@ void readSensors() {
   updateSensor(sensors[0]);
 }
 
+void startConveyor1() {
+  if (eStopActive || !systemRunning) return;
+  conveyor1Running = true;
+  digitalWrite(CONVEYOR_1_PIN, HIGH);
+  Serial.println("ACK:CONVEYOR:1:STARTED");
+}
+
+void stopConveyor1() {
+  conveyor1Running = false;
+  digitalWrite(CONVEYOR_1_PIN, LOW);
+  Serial.println("ACK:CONVEYOR:1:STOPPED");
+}
 void readSerial() {
   if (!Serial.available()) return;
 
@@ -329,18 +347,21 @@ void readSerial() {
   key.trim(); arg.trim();
   key.toUpperCase();
 
-
-  // MOTOR:STOP can always run — move it before all guards
+  if (key == "CONVEYOR") {
+    if (arg == "1:STOP")  { stopConveyor1();  return; }
+    if (arg == "1:START") { startConveyor1(); return; }
+    Serial.println("ERR:CONVEYOR:UNKNOWN:" + arg);
+    return;
+  }
   if (key == "MOTOR" && arg == "STOP") {
     stopSystemMotor(true);
     return;
   }
 
-  // Now the safety guards
+  // Safety guards
   if (eStopActive)    { Serial.println("ERR:ESTOP:ACTIVE");          return; }
   if (!systemRunning) { Serial.println("ERR:SYSTEM:IS_NOT_RUNNING"); return; }
 
-  // MOTOR:FORWARD needs the system not estopped (handled inside startSystemMotor already)
   if (key == "MOTOR") {
     if (arg == "FORWARD") {
       startSystemMotor();
@@ -416,4 +437,9 @@ bool longZone = (
 
   //SERVO:X:CLOSED:CATEGORY:<category>:CHANNEL:Z
   Serial.println("SERVO:" + String(idx + 1) + (detected ? ":UNSORTED" : ":SORTED") + ":CATEGORY:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
+  // If conveyor 1 was paused for this actuation we restart it
+  if (!eStopActive && systemRunning && !conveyor1Running) {
+    startConveyor1();
+    Serial.println("ACK:CONVEYOR:1:RESTARTED");
+  }
 }

@@ -1,11 +1,11 @@
 # ─────────────────────  Config ──────────────────────────
 
-# ── YOLO LABELS ─────────────────────────────────────────────
+# ── YOLO LABELS 
 # can be replaced by "yolo11sV0", "yolo11nV1", "yolo26nV2", "yolo26nV3" or a personal model inside /my_model_ncnn_model
 
 Yolo_model = "yolo26nV3"
 
-# ── YOLO LABELS ─────────────────────────────────────────────
+# ── YOLO LABELS 
 
 labels = [
     "Applicator A",
@@ -37,7 +37,7 @@ DEVICE_COLORS = {
     "inhaler":    (139, 0, 0),
 }
 
-# ── MAPPINGS ───────────────────────────────────────────────
+# ── MAPPINGS 
 
 LABEL_TO_CATEGORY = {
     0: "applicator",
@@ -71,23 +71,23 @@ SERVO_COLOR = {
     "inhaler":    (80, 255, 200),
 }
 
-# ── MODEL / INFERENCE SETTINGS ─────────────────────────────
+# ── MODEL / INFERENCE SETTINGS 
 
 input_size = 320
 conf_thresh = 0.8
 nms_thresh = 0.45
 
-# ── BUFFER SETTINGS ────────────────────────────────────────
+# ── BUFFER SETTINGS 
 
 min_frames = 20
 gap_limit = 20
 
-# ── SERIAL SETTINGS ────────────────────────────────────────
+# ── SERIAL SETTINGS 
 BAUD = 115200
 PORT = "/dev/ttyACM0"
 SOCKET_PORT = 5500
 
-# ── CONVEYOR PIN MAPPING ──────────────────────────────────
+# ── CONVEYOR PIN MAPPING 
 # Each conveyor has its own Arduino pin
 CONVEYOR_PINS = {
     "conveyor_1": 10,  # NOTE:  Conveyor 1 and 2 currently driven by Pin 10 in arduino since no need for dependency management.
@@ -95,6 +95,10 @@ CONVEYOR_PINS = {
     "conveyor_3": 8,   
 }
 
+# ── CONVEYOR 1 centre-trigger window
+CENTER_X_MIN = 130   
+CENTER_X_MAX = 190  
+CONVEYOR_1_STOP_COOLDOWN = 1.5  # seconds between CONVEYOR:1:STOP sends
 
 def normalize_conveyor_db_id(raw, default=1):
     """Numeric id for DB / dashboard DOM (1, 2, 3). Accepts 1, '1', 'conveyor_1'."""

@@ -131,6 +131,7 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
 
             is_motor_ack  = len(parts) >= 3 and parts[0] == "ACK" and parts[1].startswith("MOTOR")
             is_system_ack = len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM"
+            is_conveyor_break = len(parts) == 4 and parts[0] == "ACK" and parts[1] == "CONVEYOR"
             if is_motor_ack or is_system_ack:
                 running = parts[2] in ("FORWARD", "STARTED")
                 label   = "DASHBOARD BUTTON" if is_motor_ack else "ARDUINO BUTTON"
@@ -156,7 +157,12 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                     emit_fn("lamp_update", lamp_state)
 
                 continue
-
+            if is_conveyor_break:
+                conv_id = f"conveyor_{parts[2]}"          
+                running = parts[3] in ("STARTED", "RESTARTED")
+                multi_motor_state_setter(conv_id, running)
+                emit_fn("conveyor_state", {"id": conv_id, "running": running})
+                continue
             # label ack
             if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "LABEL":
                 category = parts[2].lower()

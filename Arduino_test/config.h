@@ -10,7 +10,7 @@
 
 // ── MOTOR ────────────────────────────────────────────────────
 #define MotorFw     10
-
+#define CONVEYOR_1_PIN  9
 // ── SENSORS ──────────────────────────────────────────────────
 #define POS_SENSOR_1  4
 
@@ -56,6 +56,7 @@ const unsigned long DEBOUNCE_MS    = 500;   // Debounce time for buttons and sen
 //PULLDOWN_2          6
 //PULLDOWN_1          7
 //START_STOP_PIN      8
+//CONVEYOR_1_PIN      9
 //MotorFw             10
 //PULLDOWN_R          11
 //ESTOP_PIN           12  

@@ -25,7 +25,7 @@ from ProgramManager.serialManager import SerialManager, serial_reader
 from ProgramManager.socketManager import SocketManager
 from ProgramManager.Buffer import BufferManager,configure_buffer_manager
 from ProgramManager.config import ( labels, num_classes, bbox_colors,input_size, conf_thresh, nms_thresh, min_frames, gap_limit,Yolo_model,
-                                    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT)
+                                    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT,CENTER_X_MIN, CENTER_X_MAX, CONVEYOR_1_STOP_COOLDOWN)
 from ProgramManager.ErrorManager import get_error_manager
 
 # ── Model paths 
@@ -258,6 +258,7 @@ threading.Thread(target=lambda: asyncio.run(run_ws_server()), daemon=True).start
 
 fps_buffer = []
 prev_t     = None
+last_conveyor1_stop_ts = 0.0 
 
 try:
     while True:
@@ -305,15 +306,26 @@ try:
             )
             detections = [detections[i] for i in keep]
 
-        # ── Feed buffer 
+        # ── Feed buffer/Centre-trigger: stop conveyor 1 if object is centred during actuation 
         if detections:
             best = max(detections, key=lambda d: d[4])
             cid  = int(best[5])
             cat  = LABEL_TO_CATEGORY.get(cid, "unrecognized").lower()
+
+            # Compute centre X in original frame space, then map to input_size space
+            cx_px = (best[0] + best[2]) / 2          # centre X in frame pixels (w0)
+            cx_norm = cx_px / w0                      # normalise 0‥1
+            cx_input = cx_norm * input_size            # map to input_size space
+
+            now_ts = time.time()
+            if (CENTER_X_MIN <= cx_input <= CENTER_X_MAX
+                    and (now_ts - last_conveyor1_stop_ts) > CONVEYOR_1_STOP_COOLDOWN):
+                serial.send("CONVEYOR:1:STOP")
+                last_conveyor1_stop_ts = now_ts
+
             buf_mgr.add(cat, weight=float(best[4]))
         else:
             buf_mgr.no_detection()
-
         # ── Detection draw 
         for d in detections:
             x1, y1, x2, y2, conf, cid = d
