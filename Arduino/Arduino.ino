@@ -1,12 +1,13 @@
-#include "config.h"                
+#include "config.h"          // Pin definitions and constants
 #include <EEPROM.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+#include <string.h>
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 const int   EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
-const int   SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_1, S_MOTOR_2, S_MOTOR_3, S_MOTOR_4 };
+const int   SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_12, S_MOTOR_13, S_MOTOR_14, S_MOTOR_15 };
 const char* CATEGORY_NAMES[NB_SERVOS]   = { "canister", "chemical", "applicator", "inhaler" };
 
 int  servoPos[NB_SERVOS];
@@ -41,10 +42,7 @@ struct Sensor {
   unsigned long lastEdge;
 };
 
-Sensor sensors[2] = {
-  { 1, POS_SENSOR_1, LOW, LOW, false, 0 },
-  { 2, POS_SENSOR_2, LOW, LOW, false, 0 }
-};
+Sensor sensors[1] = {  { 1, POS_SENSOR_1, LOW, LOW, false, 0 }};
 
 // ── HELPERS ──────────────────────────────────────────────────
 uint16_t angleToPulse(int angle) {
@@ -68,13 +66,14 @@ void updateOrangeLamp() {
   digitalWrite(ORANGE_LAMP_PIN, (!systemRunning && !eStopActive) ? HIGH : LOW);
 }
 
+// -- READ MOTOR FEEDBACK (if wired) ───────────────────────────────────
 // ── DOOR SWITCH UPDATE ────────────────────────────────────────
 // Called every loop. If either door opens → cut UV immediately.
 // If both doors close again → restore UV only if systemRunning
 // and uvOn are both true (button state is preserved).
 void readDoorSwitches() {
-  bool d1 = digitalRead(DOOR_SWITCH_1), d2 = digitalRead(DOOR_SWITCH_2);  // HIGH = closed, LOW = open
-  bool newDoor1Closed = (d1 == HIGH)  , newDoor2Closed = (d2 == HIGH); 
+  bool d1 = digitalRead(DOOR_SWITCH_1), d2 = digitalRead(DOOR_SWITCH_2);  // LOW = closed, HIGH = open
+  bool newDoor1Closed = (d1 == LOW)  , newDoor2Closed = (d2 == LOW); 
 
   bool stateChanged = (newDoor1Closed != door1Closed) || (newDoor2Closed != door2Closed);
 
@@ -107,14 +106,16 @@ void readUVButton() {
   }
 
   if ((millis() - lastUVDebounceTime) > BUTTON_DEBOUNCE_MS) {
-    if (currentUVButtonState == LOW && lastUVButtonState == HIGH) {// rising edge -> button pressed
+    if (currentUVButtonState == LOW && lastUVButtonState == HIGH) {// falling edge -> button pressed
       // Only toggle UV if system is running
-      if (systemRunning) {
+      if (systemRunning && door1Closed && door2Closed) {
         uvOn = !uvOn;
         digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
         Serial.println(uvOn ? "ACK:UV:ON" : "ACK:UV:OFF");
       }
-      // If the system is not running, the pressed button is ignored
+      else if (currentUVButtonState == LOW && lastUVButtonState == HIGH) {
+        Serial.println("ACK:UV:BLOCKED");
+      }
     }
     lastUVButtonState = currentUVButtonState;
   }
@@ -129,7 +130,6 @@ bool checkServoWired(int idx) {
   }
   pwm.setPWM(SERVO_CHANNELS[idx], 0, pulse);
   delay(20);
-  uint16_t readOn  = pwm.getPWM(SERVO_CHANNELS[idx], 0);
   uint16_t readOff = pwm.getPWM(SERVO_CHANNELS[idx], 1);
   if (readOff < SERVO_CHECK_MIN_PULSE || readOff > SERVO_CHECK_MAX_PULSE) {
     Serial.println("ERR:SERVO:" + String(idx + 1) + (":WIRING:READBACK_FAILED:EXPECTED:" + String(pulse) + ":GOT:" + String(readOff)));
@@ -146,8 +146,10 @@ void readEStop() {
     eStopActive   = true;
     systemRunning = false;
     motorRunning  = false;
+    uvOn = false;
 
     digitalWrite(MotorFw,    LOW);
+    digitalWrite(UV_LAMP_PIN, LOW);
 
     // Close all servos immediately, even mid-actuation
     inActuation = false;
@@ -174,18 +176,26 @@ void startSystemMotor() {
     Serial.println("ERR:ESTOP:ACTIVE");
     return;
   }
-  digitalWrite(MotorFw,HIGH);
-  motorRunning  = true;
+
+  digitalWrite(MotorFw, HIGH);
   systemRunning = true;
+  motorRunning  = true;
+
+  if (door1Closed && door2Closed) {
+    digitalWrite(UV_LAMP_PIN, uvOn ? HIGH : LOW);
+  } else {
+    digitalWrite(UV_LAMP_PIN, LOW);
+    Serial.println("ACK:UV:OFF:DOOR_OPEN");
+  }
+
   updateOrangeLamp();
 }
 
 void stopSystemMotor(bool closeServos) {
-  digitalWrite(MotorFw,    LOW);
-  motorRunning  = false;
   systemRunning = false;
+  motorRunning = false;
+  digitalWrite(MotorFw, LOW);
 
-  // Force UV off when system stops, button is also blocked from now on
   uvOn = false;
   digitalWrite(UV_LAMP_PIN, LOW);
   Serial.println("ACK:UV:OFF");
@@ -196,6 +206,7 @@ void stopSystemMotor(bool closeServos) {
       servoOpen[i] = false;
     }
   }
+
   updateOrangeLamp();
 }
 
@@ -234,8 +245,6 @@ void setup() {
   pinMode(PULLDOWN_R, OUTPUT); digitalWrite(PULLDOWN_R, LOW);
 
   pinMode(POS_SENSOR_1, INPUT);
-  pinMode(POS_SENSOR_2, INPUT);
-  pinMode(RESET_SENSOR, INPUT);
 
   pinMode(MotorFw,    OUTPUT); digitalWrite(MotorFw,    LOW);
 
@@ -264,7 +273,7 @@ void setup() {
     }
   }
 
-  Serial.println("=== Sorting System Ready ===");
+  Serial.println("========= Sorting System Ready =========");
 }
 
 void loop() {
@@ -277,7 +286,7 @@ void loop() {
   readSerial();
 }
 
-void updateSensor(Sensor &s, int servoStart, int servoEnd) {
+void updateSensor(Sensor &s) {
   unsigned long now     = millis();
   bool          reading = digitalRead(s.pin);
 
@@ -290,7 +299,7 @@ void updateSensor(Sensor &s, int servoStart, int servoEnd) {
   if (reading == HIGH && s.state == LOW) {// Rising edge → object detected by sensor
     s.state     = HIGH;
     s.triggered = true;
-    Serial.print("SENSOR:"); Serial.print(s.id); Serial.println(":TRIGGERED");
+    Serial.println("SENSOR:END:OBJECT_NOT_DETECTED");
 
   } else if (reading == LOW && s.state == HIGH) { // Falling edge → object left the sensor
     s.state     = LOW;
@@ -299,8 +308,7 @@ void updateSensor(Sensor &s, int servoStart, int servoEnd) {
 }
 
 void readSensors() {
-  updateSensor(sensors[0], 0, 2);
-  updateSensor(sensors[1], 2, 4);
+  updateSensor(sensors[0]);
 }
 
 void readSerial() {
@@ -313,18 +321,18 @@ void readSerial() {
 
   int sep = rawCmd.indexOf(':');
 
+  if (sep <= 0) { Serial.println("ERR:SYSTEM:UNKNOWN_CMD"); return; }
+
 // Check if the command readed command are correct 
   String key = rawCmd.substring(0, sep);
   String arg = rawCmd.substring(sep + 1);
   key.trim(); arg.trim();
   key.toUpperCase();
 
-  if (sep <= 0) { Serial.println("ERR:SYSTEM:UNKNOWN_CMD"); return; }
 
   // MOTOR:STOP can always run — move it before all guards
   if (key == "MOTOR" && arg == "STOP") {
     stopSystemMotor(true);
-    Serial.println("ACK:MOTOR:STOP");
     return;
   }
 
@@ -336,9 +344,9 @@ void readSerial() {
   if (key == "MOTOR") {
     if (arg == "FORWARD") {
       startSystemMotor();
-      if (!eStopActive) Serial.println("ACK:MOTOR:FORWARD");
+      Serial.println("ACK:SYSTEM:STARTED");
     } else {
-      Serial.print("ERR:MOTOR:UNKNOWN:" + String(arg));
+      Serial.println("ERR:MOTOR:UNKNOWN:" + String(arg)); // Probably unwired motor once feedback wired (to be added)
     }
     return;
   }
@@ -362,12 +370,13 @@ void readSerial() {
     return;
   }
   Serial.println("ACK:LABEL:" + String(category)); // aknoledged anyway to shown which category is being system 
-  if (servoWired[idx]) {actuateServo(idx);}
+  actuateServo(idx);
 }
 
 void actuateServo(int idx) {
+  if (inActuation) return;
   inActuation = true;
-  Sensor &s = sensors[(idx < 2) ? 0 : 1];
+  Sensor &s = sensors[0];
   s.triggered = false;
   int openPos = getOpenPos(idx);// return oppen position based on the servo index (left or right)
 
@@ -377,7 +386,6 @@ void actuateServo(int idx) {
   Serial.println("SERVO:" + String(idx + 1) + ":OPEN:" + String(openPos) + ":CATEGORY:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
 
   delay(SERVO_OPEN_MS);
-  s.triggered = false; // initialise trigger
 
   unsigned long start    = millis();
   bool detected = false;
@@ -385,16 +393,20 @@ void actuateServo(int idx) {
 // Wait for the sensor trigger or timeout to check if the object was detected in front of the door.
 // During this time, no new actuation can start to avoid multiple triggers from the same object
 // and to let the servo close properly.
+bool longZone = (
+  strcmp(CATEGORY_NAMES[idx], "chemical") == 0 ||
+  strcmp(CATEGORY_NAMES[idx], "inhaler") == 0);
 
- const unsigned long SENSOR_TIMEOUT = (idx < 2) ? SENSOR_TIMEOUT_1 : SENSOR_TIMEOUT_2; // use different timeouts for the 2 zones since the 2nd zone is further and the object may take more time to reach it
-
-  while (millis() - start < SENSOR_TIMEOUT) {
-    readSensors(); // Continuously read sensor to see if the object has reached the servo door 
-    if (s.triggered) { // if the sensor is triggered, it means that the object has reached the servo door and is ready to be sorted
-      detected    = true;
-      s.triggered = false;// reset trigger for next time
-      //SERVO:X:OBJECT_DETECTED:CATEGORY:<category>:CHANNEL:Z
-      Serial.println("SERVO:" + String(idx + 1) + ":OBJECT_DETECTED:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
+ const unsigned long TIMEOUT = longZone ? TIMEOUT_2 : TIMEOUT_1; // use different timeouts for the 2 zones since the 2nd zone is further and the object may take more time to reach it
+ while (millis() - start < TIMEOUT) {
+    readEStop();
+    if (eStopActive){
+      detected = true;
+      break;
+    }
+    updateSensor(s); // update the sensor state during the wait
+    if (s.triggered) {
+      detected = true;
       break;
     }
   }
@@ -403,5 +415,5 @@ void actuateServo(int idx) {
   inActuation    = false;
 
   //SERVO:X:CLOSED:CATEGORY:<category>:CHANNEL:Z
-  Serial.println("SERVO:" + String(idx + 1) + (detected ? ":CLOSED_OK" : ":CLOSED_TIMEOUT") + ":CATEGORY:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
+  Serial.println("SERVO:" + String(idx + 1) + (detected ? ":UNSORTED" : ":SORTED") + ":CATEGORY:" + String(CATEGORY_NAMES[idx]) + ":CHANNEL:" + String(SERVO_CHANNELS[idx]));
 }

@@ -134,58 +134,22 @@ class BufferManager:
         Record that this frame had no detection above threshold.
 
         Normal behaviour: commits if gap_limit is reached and votes exist.
-        Post-pin12 behaviour (rule 4): if _Already_committed is set, the
-        gap signals the object has left — clear the flag and wipe without
-        committing, so the next arrival starts a fresh event.
         """
+    
         snapshot = None
         with self._lock:
             self._buf.gap_counter += 1
             gap = self._buf.gap_counter
 
             if gap >= self._gap_limit and self._buf.frame_count > 0:
-                if self._Already_committed:
-                    # Object from the last pin12 event has now left — reset
-                    # without committing (already counted once, rule 4).
-                    print("[BUFFER] gap after pin12 commit — wiping without re-commit (rule 4)")
-                    self._buf.reset()
-                    self._Already_committed = False
-                else:
-                    snapshot = list(self._buf.votes)
-                    self._buf.reset()
+                snapshot = list(self._buf.votes)
+                self._buf.reset()
 
         self._emit_state()
 
         if snapshot is not None:
-            print(f"[BUFFER] gap limit reached -> auto-commit ({len(snapshot)} frames)")
+            print(f"[BUFFER] gap limit reached -> commit ({len(snapshot)} frames)")
             self._trigger_commit(snapshot)
-
-    def handle_pin12(self):
-        """
-        Called on SENSOR:1:TRIGGERED (pin 12).
-        Commits if >= min_frames accumulated, then wipes and keeps going.
-        If below min_frames the buffer is still wiped (not enough data).
-        Sets _Already_committed = True after a successful commit to prevent
-        the gap_limit fallback from re-committing the same object.
-        """
-        snapshot   = None
-        has_enough = False
-
-        with self._lock:
-            has_enough = self._buf.frame_count >= self._min_frames
-            if has_enough:
-                snapshot = list(self._buf.votes)
-                self._Already_committed = True   # rule 4: suppress further commits
-            self._buf.reset()
-
-        if has_enough:
-            print(f"[BUFFER] pin12 → committing ({len(snapshot)} frames)")
-            self._trigger_commit(snapshot)
-        else:
-            print(f"[BUFFER] pin12 → wiped "
-                  f"({self._buf.frame_count}/{self._min_frames} frames, below threshold)")
-
-        self._emit_state()
 
     # ── handle_clear / handle_reset (keyboard 'C') ────────────────────────────
 
@@ -204,7 +168,6 @@ class BufferManager:
             if self._buf.frame_count > 0:
                 snapshot = list(self._buf.votes)
                 self._buf.reset()
-            self._Already_committed = False
 
         if snapshot:
             self._trigger_commit(snapshot)
