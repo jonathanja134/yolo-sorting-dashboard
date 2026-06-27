@@ -1,28 +1,10 @@
 """
 Buffer.py – Always-on majority-vote detection buffer.
 
-Collection never stops. Commits are triggered ONLY by:
-  1. SENSOR:1:TRIGGERED (pin 12) → commit if >= min_frames, wipe, keep going
-  2. Manual clear (keyboard 'C') → commit whatever was gathered, wipe, reset
-  3. gap_limit consecutive empty frames → commit if >= min_frames, wipe (fallback)
+Collection never stops. Commits are triggered ONLY by gap_limit consecutive empty frames → commit if >= min_frames, wipe (fallback)
 
-Rule: Only one database entry per sensor trigger. The add() method never
-auto-commits; it just accumulates frames for better accuracy. Commits only
-happen when explicitly triggered (sensor or manual clear).
-
-There is no collecting gate. add() and no_detection() are always live.
-
-Usage in yolo_reader.py:
-    from ProgramManager.Buffer import BufferManager
-
-    buffer_mgr = BufferManager(
-        min_frames       = args.min_frames,
-        gap_limit        = args.gap_limit,
-        emit_fn          = _async_emit,
-        serial_send_fn   = serial.send,
-        get_active_servo = lambda: (active_servo, active_servo_until),
-        set_active_servo = lambda cat, t: ...,
-    )
+Rule: Only one database entry per sensor commit. The add() method never
+auto-commits; it just accumulates frames for better accuracy. Commits only happen when explicitly triggered (sensor or manual clear).
 
     # In the inference loop:
     buffer_mgr.add(category, weight=confidence)
@@ -125,7 +107,6 @@ class BufferManager:
     def no_detection(self):
         """
         Record that this frame had no detection above threshold.
-
         Normal behaviour: commits if gap_limit is reached and votes exist.
         """
     
@@ -144,17 +125,11 @@ class BufferManager:
             print(f"[BUFFER] gap limit reached -> commit ({len(snapshot)} frames)")
             self._trigger_commit(snapshot)
 
-    # ── handle_clear / handle_reset (keyboard 'C') ────────────────────────────
-
-    def handle_reset(self):
-        """Alias for handle_clear -> called by KeyboardSimulation.py."""
-        self.handle_clear()
+    # ── handle_clear ────────────────────────────
 
     def handle_clear(self):
         """
-        Called on keyboard 'C'.
         Commits whatever was gathered (regardless of min_frames), then wipes.
-        Also resets the pin12 guard so a manual clear fully resets state.
         """
         snapshot = None
         with self._lock:

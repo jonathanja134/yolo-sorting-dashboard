@@ -1,16 +1,10 @@
 import queue
-from cv2 import data
 import socketio
 import threading
 import time
 
 from ProgramManager.ErrorManager import get_error_manager
-from ProgramManager.config import conveyor_socket_id, normalize_conveyor_db_id
-
-
-# Dashboard shows conveyors 1–2; one physical motor drives both.
-_MOTOR_CONVEYORS = ("conveyor_1", "conveyor_2")
-_ALL_CONVEYORS = ("conveyor_1", "conveyor_2", "conveyor_3")
+from ProgramManager.config import CONVEYOR_ID
 
 
 class SocketManager:
@@ -18,17 +12,19 @@ class SocketManager:
         self,
         server_url,
         serial_send_fn,
-        get_multi_conveyor_fn,
-        set_multi_conveyor_fn,
+        get_conveyor_fn,
+        set_conveyor_fn,
         emit_fn=None,
         serial_ok_fn=None,
+        get_lamp_fn=None,
     ):
         self.server_url = server_url
         self.serial_send_fn = serial_send_fn
-        self.get_multi_conveyor_fn = get_multi_conveyor_fn
-        self.set_multi_conveyor_fn = set_multi_conveyor_fn
+        self.get_conveyor_fn = get_conveyor_fn
+        self.set_conveyor_fn = set_conveyor_fn
         self.emit_fn = emit_fn
         self.serial_ok_fn = serial_ok_fn
+        self.get_lamp_fn = get_lamp_fn
         self._motor_physically_running = False
 
         self.sio = socketio.Client(reconnection=True, reconnection_attempts=0)
@@ -38,7 +34,7 @@ class SocketManager:
     def _register_handlers(self):
         @self.sio.on("connect")
         def on_sio_connect():
-            print("[SIO] connected - emitting initial conveyor states")
+            print("[SIO] connected - emitting initial conveyor state")
             get_error_manager(self.emit_fn).replay_pending()
             if self.serial_ok_fn:
                 connected = self.serial_ok_fn()
@@ -47,13 +43,14 @@ class SocketManager:
                     "port": None,
                     "timestamp": time.time(),
                 })
-            states = self.get_multi_conveyor_fn()
-            self._motor_physically_running = self._any_dashboard_conveyor_running(states)
-            for conv_id, state in states.items():
-                self.async_emit("conveyor_state", {
-                    "id": conv_id,
-                    "running": state,
-                })
+            running = self.get_conveyor_fn()
+            self._motor_physically_running = running
+            self.async_emit("conveyor_state", {
+                "id": CONVEYOR_ID,
+                "running": running,
+            })
+            if self.get_lamp_fn:
+                self.async_emit("lamp_update", self.get_lamp_fn())
 
         @self.sio.on("latency_reply")
         def on_latency_reply(data):
@@ -62,8 +59,6 @@ class SocketManager:
 
         @self.sio.on("update_conveyor")
         def on_conveyor_update(data):
-            db_id = normalize_conveyor_db_id(data.get("id"), default=1)
-            conv_id = conveyor_socket_id(db_id)
             requested = bool(data.get("running", False))
             force_motor = bool(data.get("force_motor", False))
 
@@ -72,18 +67,12 @@ class SocketManager:
                 return
 
             # Arduino / status relay — update state only, never write serial
-            self.set_multi_conveyor_fn(conv_id, requested)
-            states = self.get_multi_conveyor_fn()
-            self._motor_physically_running = self._any_dashboard_conveyor_running(states)
-
-    @staticmethod
-    def _any_dashboard_conveyor_running(states):
-        return any(states.get(cid, False) for cid in _MOTOR_CONVEYORS)
+            self.set_conveyor_fn(requested)
+            self._motor_physically_running = requested
 
     def _apply_dashboard_motor_command(self, running):
-        """Dashboard button toggles the shared motor; keep all conveyors in sync."""
-        for cid in _ALL_CONVEYORS:
-            self.set_multi_conveyor_fn(cid, running)
+        """Dashboard Start/Stop toggles the shared motor on pin 10."""
+        self.set_conveyor_fn(running)
 
         if running == self._motor_physically_running:
             return

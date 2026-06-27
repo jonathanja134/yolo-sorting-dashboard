@@ -4,9 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Sorting Dashboard</title>
+  <!-- Local assets — dashboard works without internet (no CDN) -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="/static/js/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/vendor/socket.io.min.js"></script>
   <link rel="stylesheet" href="/static/css/style.css"/>
 </head>
 <body>
@@ -30,7 +31,7 @@
 <!-- ── STATUS LAMPS BAR ── -->
 <div class="lamps-bar">
   <div class="lamp-cell">
-    <div class="lamp" id="lamp-red"></div>
+    <div class="lamp" id="lamp-red" class="lamp off"></div>
     <span class="lamp-label">E-STOP</span>
   </div>
   <div class="lamp-cell">
@@ -159,7 +160,7 @@
   <div class="card-title">Conveyors</div>
 
   <!-- Single control button for both conveyors -->
-  <button class="conveyor-action-btn start-btn" id="conveyor-main-btn" onclick="toggleConveyor(1)">
+  <button class="conveyor-action-btn start-btn" id="conveyor-main-btn" onclick="toggleConveyor()">
     Start
   </button>
 <div></div>
@@ -360,7 +361,8 @@
 <script>
   const wsStreamImg    = document.getElementById('stream');
   const wsStreamStatus = document.getElementById('stream-status');
-  const ws = new WebSocket(`ws://${window.location.hostname}:8765`);
+  const wsHost = window.location.hostname || '127.0.0.1';
+  const ws = new WebSocket(`ws://${wsHost}:8765`);
   ws.binaryType = 'arraybuffer';
   let prevUrl   = null;
   let connected = false;

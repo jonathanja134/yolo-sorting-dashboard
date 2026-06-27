@@ -21,11 +21,11 @@ import serial, os, numpy as np, time, sys, termios, ncnn, cv2, threading, asynci
 from collections import Counter
 from picamera2 import Picamera2
 from ProgramManager.event_bus import configure_emit, _async_emit
-from ProgramManager.serialManager import SerialManager, serial_reader
+from ProgramManager.serialManager import SerialManager, serial_reader, get_lamp_state
 from ProgramManager.socketManager import SocketManager
 from ProgramManager.Buffer import BufferManager,configure_buffer_manager
 from ProgramManager.config import ( labels, num_classes, bbox_colors,input_size, conf_thresh, nms_thresh, min_frames, gap_limit,Yolo_model,
-                                    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT)
+                                    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT, DASHBOARD_URL)
 from ProgramManager.ErrorManager import get_error_manager
 
 # ── Model paths 
@@ -38,45 +38,28 @@ bin_file   = os.path.join(model_dir, "model.ncnn.bin")
 serial = SerialManager(baud=BAUD)
 print("~ 0 Serial Manager created")
 
-# ── Conveyor motor states (3 separate conveyors) 
-# threading lock ensures that only one system at the time can edit the variable
-motor_1_running = False # Conveyor 1: Pin 10
-motor_1_lock    = threading.Lock()
-motor_2_running = False # Conveyor 2: Pin 9
-motor_2_lock    = threading.Lock()
-motor_3_running = False # Conveyor 3: Pin 8
-motor_3_lock    = threading.Lock()
+# ── Conveyor motor state (conveyor_1 / pin 10) ──
+motor_running = False
+motor_lock    = threading.Lock()
 
-def _get_multi_conveyor_states():
-    "Return {conveyor_1: bool, conveyor_2: bool, conveyor_3: bool}"
-    with motor_1_lock, motor_2_lock, motor_3_lock:
-        return {
-            "conveyor_1": motor_1_running,
-            "conveyor_2": motor_2_running,
-            "conveyor_3": motor_3_running,
-        }
+def _get_conveyor_state():
+    with motor_lock:
+        return motor_running
 
-def _set_multi_conveyor_state(conv_id, running):
-    "Set state for a specific conveyor by ID"
-    global motor_1_running, motor_2_running, motor_3_running
-    if conv_id == "conveyor_1":
-        with motor_1_lock:
-            motor_1_running = running
-    elif conv_id == "conveyor_2":
-        with motor_2_lock:
-            motor_2_running = running
-    elif conv_id == "conveyor_3":
-        with motor_3_lock:
-            motor_3_running = running
+def _set_conveyor_state(running):
+    global motor_running
+    with motor_lock:
+        motor_running = running
 
 # ── SocketIO → dashboard (before model load so startup errors are delivered) ───
 socket_mgr = SocketManager(
-    server_url="http://localhost:5000",
-    get_multi_conveyor_fn=_get_multi_conveyor_states,
-    set_multi_conveyor_fn=_set_multi_conveyor_state,
+    server_url=DASHBOARD_URL,
+    get_conveyor_fn=_get_conveyor_state,
+    set_conveyor_fn=_set_conveyor_state,
     serial_send_fn=serial.send,
     emit_fn=_async_emit,
     serial_ok_fn=serial.serial_ok,
+    get_lamp_fn=get_lamp_state,
 )
 _async_emit = socket_mgr.async_emit
 socket_mgr.start()
@@ -166,10 +149,9 @@ threading.Thread(
     kwargs={
         "serial_manager": serial,
         "emit_fn": _async_emit,
-        "buffer_manager": buf_mgr,
         "servo_index_to_category": SERVO_INDEX_TO_CATEGORY,
         "set_active_servo": _set_active_servo,
-        "multi_motor_state_setter": _set_multi_conveyor_state,
+        "set_conveyor_state": _set_conveyor_state,
     },
     daemon=True,
 ).start()
@@ -276,9 +258,7 @@ try:
         frame_resized = cv2.resize(frame, (input_size, input_size))
         frame_resized = np.ascontiguousarray(frame_resized)
 
-        mat = ncnn.Mat.from_pixels(frame_resized,ncnn.Mat.PixelType.PIXEL_RGB,
-            input_size,
-            input_size,)
+        mat = ncnn.Mat.from_pixels(frame_resized,ncnn.Mat.PixelType.PIXEL_RGB,input_size,input_size,)
         mat.substract_mean_normalize([0, 0, 0], [1/255.0] * 3)
 
         ex = net.create_extractor()

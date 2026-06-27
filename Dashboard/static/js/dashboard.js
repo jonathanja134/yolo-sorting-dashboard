@@ -51,11 +51,79 @@ const pieChart = new Chart(pieCtx, {
 
 // ── LOCAL STATE ──
 const counts = { canister: 0, chemical: 0, applicator: 0, inhaler: 0, unsorted: 0 };
+// ── CONVEYOR — one motor (conveyor_1); UI shows two status rows ──
+const UI_CONVEYOR_IDS = [1, 2];
+const BACKEND_CONVEYOR_ID = 1;
 const conveyorState = { 1: 'stopped', 2: 'stopped' };
+let conveyorTogglePending = false;
 
-function normalizeConveyorId(id) {
-  return parseInt(id, 10) || 1;
+function updateConveyorRowUI(id, state) {
+  const led = document.getElementById(`conveyor-${id}-led`);
+  if (!led) return;
+  const txt = document.getElementById(`conveyor-${id}-text`);
+  const strokeColor = { running: '#22c55e', stopped: '#ef4444', warning: '#f97316' };
+
+  if (state === 'disconnected') {
+    txt.textContent = 'Disconnected';
+    led.className   = 'conveyor-status-btn disconnected';
+    led.querySelector('svg').setAttribute('stroke', '#6b7280');
+    return;
+  }
+
+  led.className = `conveyor-status-btn ${state}`;
+  led.querySelector('svg').setAttribute('stroke', strokeColor[state] || '#9aa3b8');
+  if (state === 'running') {
+    txt.textContent = 'Running';
+  } else if (state === 'stopped') {
+    txt.textContent = 'Stopped';
+  } else {
+    txt.textContent = 'Warning — Check system';
+  }
 }
+
+function updateConveyorMainButton(state) {
+  const btn = document.getElementById('conveyor-main-btn');
+  if (!btn) return;
+
+  if (state === 'disconnected') {
+    btn.className   = 'conveyor-action-btn disabled-btn';
+    btn.textContent = 'Unavailable';
+    btn.disabled    = true;
+    return;
+  }
+
+  btn.disabled = false;
+  if (state === 'running') {
+    btn.className   = 'conveyor-action-btn stop-btn';
+    btn.textContent = 'Stop';
+  } else if (state === 'stopped') {
+    btn.className   = 'conveyor-action-btn start-btn';
+    btn.textContent = 'Start';
+  } else {
+    btn.className   = 'conveyor-action-btn stop-btn';
+    btn.textContent = 'Stop';
+  }
+}
+
+function applyConveyorSystemState(state) {
+  UI_CONVEYOR_IDS.forEach((id) => {
+    conveyorState[id] = state;
+    updateConveyorRowUI(id, state);
+  });
+  updateConveyorMainButton(state);
+}
+
+function toggleConveyor() {
+  if (conveyorState[BACKEND_CONVEYOR_ID] === 'disconnected' || conveyorTogglePending) return;
+  const next = conveyorState[BACKEND_CONVEYOR_ID] === 'running' ? 'stopped' : 'running';
+  conveyorTogglePending = true;
+  socket.emit('control_conveyor', {
+    id: BACKEND_CONVEYOR_ID,
+    command: next === 'running' ? 'start' : 'stop',
+  });
+  setTimeout(() => { conveyorTogglePending = false; }, 3000);
+}
+
 let arduinoConnected = false;
 const activeErrors = {};
 const DISCONNECT_WARNING = '⚠ Arduino disconnected — conveyors are disabled.';
@@ -99,54 +167,6 @@ function updateCounts(data) {
   }
 }
 
-// ── CONVEYOR — MANUAL TOGGLE (one physical motor → both UI rows stay in sync) ──
-let conveyorTogglePending = false;
-
-function toggleConveyor(id) {
-  const cid = normalizeConveyorId(id);
-  if (conveyorState[cid] === 'disconnected' || conveyorTogglePending) return;
-  const next = conveyorState[cid] === 'running' ? 'stopped' : 'running';
-  conveyorTogglePending = true;
-  socket.emit('control_conveyor', { id: cid, command: next === 'running' ? 'start' : 'stop' });
-  setTimeout(() => { conveyorTogglePending = false; }, 3000);
-}
-
-function setConveyorState(id, state) {
-  const cid = normalizeConveyorId(id);
-  const led = document.getElementById(`conveyor-${cid}-led`);
-  if (!led) return;
-  conveyorState[cid] = state;
-  const txt = document.getElementById(`conveyor-${cid}-text`);
-  const btn = document.getElementById('conveyor-main-btn');
-  const strokeColor = { running: '#22c55e', stopped: '#ef4444', warning: '#f97316' };
-  led.className = `conveyor-status-btn ${state}`;
-  led.querySelector('svg').setAttribute('stroke', strokeColor[state] || '#9aa3b8');
-
-  if (state === 'disconnected') {
-    txt.textContent = 'Disconnected';
-    btn.className   = 'conveyor-action-btn disabled-btn';
-    btn.textContent = 'Unavailable';
-    btn.disabled    = true;
-    led.className   = 'conveyor-status-btn disconnected';
-    led.querySelector('svg').setAttribute('stroke', '#6b7280');
-  } else {
-    btn.disabled = false;
-    if (state === 'running') {
-      txt.textContent = 'Running';
-      btn.className   = 'conveyor-action-btn stop-btn';
-      btn.textContent = 'Stop';
-    } else if (state === 'stopped') {
-      txt.textContent = 'Stopped';
-      btn.className   = 'conveyor-action-btn start-btn';
-      btn.textContent = 'Start';
-    } else {
-      txt.textContent = 'Warning — Check system';
-      btn.className   = 'conveyor-action-btn stop-btn';
-      btn.textContent = 'Stop';
-    }
-  }
-}
-
 // ── SERVO ──
 
 function setServoState(type, active) {
@@ -167,7 +187,7 @@ function setServoState(type, active) {
     svg.setAttribute('stroke', color);
     svg.classList.add('spinning');
     status.className   = 'servo-status active';
-    status.textContent = 'Activated';
+    status.textContent = 'Opened';
     item.classList.add(`active-${type}`);
   } else {
     wrap.className  = 'servo-icon-wrap inactive';
@@ -175,7 +195,7 @@ function setServoState(type, active) {
     svg.setAttribute('stroke', '#9aa3b8');
     svg.classList.remove('spinning');
     status.className   = 'servo-status inactive';
-    status.textContent = 'Deactivated';
+    status.textContent = 'Closed';
   }
 }
 
@@ -448,33 +468,24 @@ socket.on('disconnect', () => {
 });
 
 socket.on('update_counts',      (data) => updateCounts(data));
-socket.on('update_conveyor',    (data) => {
-  const cid = normalizeConveyorId(data.id);
-  const running = !!data.running;
-  const state = running ? 'running' : 'stopped';
-  setConveyorState(cid, state);
-  const mirrorIds = cid === 3 ? [1, 2] : (cid === 1 || cid === 2 ? [cid === 1 ? 2 : 1] : []);
-  mirrorIds.forEach((n) => {
-    if (conveyorState[n] !== 'disconnected') {
-      setConveyorState(n, state);
-    }
-  });
+socket.on('update_conveyor', (data) => {
+  const state = data.running ? 'running' : 'stopped';
+  applyConveyorSystemState(state);
   conveyorTogglePending = false;
-  if (debugEnabled) appendLogRow(new Date().toISOString(), 'conveyor',
-    `Conveyor ${data.id} ${data.running ? 'started' : 'stopped'}`, '');
+  if (debugEnabled) {
+    appendLogRow(new Date().toISOString(), 'conveyor',
+      `Conveyor ${data.running ? 'started' : 'stopped'}`, 'conveyor_1');
+  }
 });
 socket.on('arduino_status', (data) => {
   arduinoConnected = !!data.connected;
   if (!arduinoConnected) {
     CATEGORIES.forEach(t => setServoState(t, false));
-    [1, 2].forEach(id => setConveyorState(id, 'disconnected'));
+    applyConveyorSystemState('disconnected');
   } else {
-    const conveyors = data.conveyors || [];
-    if (conveyors.length) {
-      conveyors.forEach(c => setConveyorState(normalizeConveyorId(c.id), c.running ? 'running' : 'stopped'));
-    } else {
-      [1, 2].forEach(id => setConveyorState(id, conveyorState[id] || 'stopped'));
-    }
+    const conv = (data.conveyors || []).find(c => c.id === BACKEND_CONVEYOR_ID);
+    const state = conv && conv.running ? 'running' : 'stopped';
+    applyConveyorSystemState(state);
   }
   refreshWarningBanner();
 });
@@ -485,8 +496,6 @@ socket.on('error_resolved', (data) => {
   refreshWarningBanner();
 });
 socket.on('lamp_update', (data) => setLamps(data));
-
-socket.on('lamp_update', (data) => console.log('lamp_update received', data));
 socket.on('update_servo', (data) => {
   setServoState(data.type, data.active);
 });
@@ -525,15 +534,25 @@ socket.on('unsorted_object_detected', (data) => {
 // ══════════════════════════════════════════
 async function loadInitialState() {
   try {
-    const res  = await fetch('/api/state');
+    const res = await fetch('/api/state');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
     const data = await res.json();
+    if (data.db_ok === false) {
+      throw new Error(data.message || 'Database unavailable');
+    }
     arduinoConnected = !!(data.arduino_status && data.arduino_status.connected);
-    data.conveyors.forEach(c => setConveyorState(normalizeConveyorId(c.id), c.running ? 'running' : 'stopped'));
+    const conv = data.conveyors.find(c => c.id === BACKEND_CONVEYOR_ID);
+    if (conv) {
+      applyConveyorSystemState(conv.running ? 'running' : 'stopped');
+    }
     if (arduinoConnected) {
       data.servos.forEach(s => setServoState(s.type, s.active));
     } else {
       CATEGORIES.forEach(t => setServoState(t, false));
-      [1, 2].forEach(id => setConveyorState(id, 'disconnected'));
+      applyConveyorSystemState('disconnected');
     }
     if (data.active_errors) {
       data.active_errors.forEach((err) => {
@@ -551,6 +570,7 @@ async function loadInitialState() {
     if (data.recent_events) populateLogFromHistory(data.recent_events);
   } catch (e) {
     console.warn('Could not load initial state:', e);
+    setWarning('Could not load dashboard data from local database. Check that the dashboard server is running.', true);
   }
 }
 

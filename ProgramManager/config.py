@@ -86,32 +86,24 @@ gap_limit = 20
 BAUD = 115200
 PORT = "/dev/ttyACM0"
 SOCKET_PORT = 5000
+# Use 127.0.0.1 (not localhost) so Pi with dashboard connection worksion works with no Ethernet/Wi‑Fi
+DASHBOARD_URL = "http://127.0.0.1:5000"
 
-# ── CONVEYOR PIN MAPPING 
-# Each conveyor has its own Arduino pin
-CONVEYOR_PINS = {
-    "conveyor_1": 10,  # NOTE:  Conveyor 1 and 2 currently driven by Pin 10 in arduino since no need for dependency management.
-    "conveyor_2": 9,  
-    "conveyor_3": 8,   
-}
+# ── CONVEYOR (single physical motor, pin 10) ──
+CONVEYOR_ID = "conveyor_1"
+CONVEYOR_PIN = 10
+CONVEYOR_PINS = {CONVEYOR_ID: CONVEYOR_PIN}
 
 # ── CONVEYOR 1 centre-trigger window
 CENTER_X_MIN = 130   
 CENTER_X_MAX = 190  
-CONVEYOR_1_STOP_COOLDOWN = 1.5  # seconds between CONVEYOR:1:STOP sends
+CONVEYOR_STOP_COOLDOWN = 1.5  # seconds between stop commands
 
 def normalize_conveyor_db_id(raw, default=1):
-    """Numeric id for DB / dashboard DOM (1, 2, 3). Accepts 1, '1', 'conveyor_1'."""
-    if raw is None:
-        return default
-    if isinstance(raw, int):
-        return raw
-    s = str(raw).strip().lower()
-    if s.startswith("conveyor_"):
-        return int(s.split("_", 1)[1])
-    return int(s)
+    """DB / dashboard DOM id — always 1 (conveyor_1)."""
+    return 1
 
 
-def conveyor_socket_id(db_id):
-    """String id for Pi motor state (conveyor_1, …)."""
-    return f"conveyor_{int(db_id)}"
+def conveyor_socket_id(db_id=None):
+    """String id for Pi motor state."""
+    return CONVEYOR_ID

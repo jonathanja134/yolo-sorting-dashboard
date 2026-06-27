@@ -73,14 +73,6 @@ ERROR_CATALOG = {
         "message": "Servo is not physically connected or wiring check failed.",
         "action": "Check servo wiring and PCA9685 channel assignment.",
     },
-    "MOTOR_FEEDBACK_MISMATCH": {
-        "code": "MOTOR_002",
-        "severity": ErrorSeverity.ERROR,
-        "source": ErrorSource.CONVEYOR,
-        "title": "Motor Feedback Mismatch",
-        "message": "Motor feedback does not match expected state.",
-        "action": "Check motor feedback connections and control logic.",
-    },
     "UNSORTED": {
         "code": "SERVO_004",
         "severity": ErrorSeverity.WARNING,
@@ -96,14 +88,6 @@ ERROR_CATALOG = {
         "title": "Servo Error",
         "message": "Failed to execute the servo command with Arduino.",
         "action": "Check Arduino connection and servo configuration.",
-    },
-    "SERVO_TIMEOUT": {
-        "code": "SERVO_001",
-        "severity": ErrorSeverity.ERROR,
-        "source": ErrorSource.SERVO,
-        "title": "Servo Close Timeout",
-        "message": "Servo closed on timeout — object may not have passed.",
-        "action": "Check object path and servo mechanism.",
     },
     "ARDUINO_SYSTEM_IS_NOT_RUNNING": {
         "code": "SYSTEM_998",

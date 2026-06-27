@@ -1,12 +1,24 @@
 import serial
 import serial.tools.list_ports
 import time
-from ProgramManager.config import BAUD
-from ProgramManager.ErrorManager import get_error_manager
 import threading
+from ProgramManager.config import BAUD, CONVEYOR_ID
+from ProgramManager.ErrorManager import get_error_manager
+
+# Shared lamp state (serial_reader updates; SocketManager re-syncs on reconnect)
+_lamp_state = {
+    "red":    False,
+    "green":  False,
+    "orange": False,
+    "blue":   False,
+}
 
 
-def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_category, set_active_servo, multi_motor_state_setter=None):
+def get_lamp_state() -> dict:
+    return dict(_lamp_state)
+
+
+def serial_reader(serial_manager, emit_fn, servo_index_to_category, set_active_servo, set_conveyor_state=None):
     """
     Read from serial port and dispatch events.
     Tracks and emits Arduino connection status.
@@ -15,12 +27,7 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
     last_connection_state = None
     unwired_servos = {}  # servo_idx -> {category, detail}
     # Track simple lamp + motor state so we can emit lamp updates
-    lamp_state = {
-        "red":    False,   # E-STOP
-        "green":  False,   # Conveyor running
-        "orange": False,   # Conveyor stopped (and e-stop NOT active)
-        "blue":   False,   # UV on
-    }
+    lamp_state = _lamp_state
     motor_running  = False
     estop_active   = False
 
@@ -136,9 +143,9 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 label   = "DASHBOARD BUTTON" if is_motor_ack else "ARDUINO BUTTON"
                 print(f"[{label.upper()}] System {'RUNNING' if running else 'STOP'}")
 
-                for conv_id in ("conveyor_1", "conveyor_2", "conveyor_3"):
-                    multi_motor_state_setter(conv_id, running)
-                    emit_fn("conveyor_state", {"id": conv_id, "running": running})
+                if set_conveyor_state:
+                    set_conveyor_state(running)
+                emit_fn("conveyor_state", {"id": CONVEYOR_ID, "running": running})
 
                 motor_running = running
                 error_mgr.resolve_error("ARDUINO_SYSTEM_IS_NOT_RUNNING")
@@ -168,7 +175,8 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
             if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "UV":
                 if parts[2] == "ON" or parts[2] == "OFF":
                     uv_on = parts[2] == "ON"
-                    error_mgr.resolve_error("UV_BLOCKED")
+                    if not uv_on:
+                        error_mgr.resolve_error("UV_BLOCKED")
                     if lamp_state.get('blue') != uv_on:
                         lamp_state['blue'] = uv_on
                         emit_fn('lamp_update', lamp_state)
@@ -176,10 +184,10 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 if parts[2] == "BLOCKED":
                     error_mgr.raise_error("UV_BLOCKED")
                     continue
-            if len(parts) == 4 and parts[0] == "ACK" and parts[4] == "DOOR_OPEN" or parts[4]=="SWITCHED":
-                if parts[4] =="DOOR_OPEN":
+            if len(parts) == 4 and parts[0] == "ACK" and parts[3] == "DOOR_OPEN" or parts[3]=="SWITCHED":
+                if parts[3] =="DOOR_OPEN" and lamp_state.get('blue'):
                     error_mgr.raise_error("UV_BLOCKED")
-                if parts[4] =="SWITCHED":
+                else:
                     error_mgr.resolve_error("UV_BLOCKED")
                 continue
             # servo events
@@ -223,8 +231,14 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                         "servo_type":  category,
                         "servo_index": servo_idx,
                         })
-                        time.sleep(10)
-                        error_mgr.resolve_error("UNSORTED")
+                        def clear_unsorted():
+                            try:
+                                error_mgr.resolve_error("UNSORTED")
+                            except Exception:
+                                pass
+                        t = threading.Timer(10.0, clear_unsorted)
+                        t.daemon = True
+                        t.start()
                     else:
                         error_mgr.resolve_error("UNSORTED")
                     set_active_servo(None, 0.0)

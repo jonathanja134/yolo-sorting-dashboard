@@ -6,7 +6,6 @@ Canonical servo / category mapping:
   chemical   → Servo 2 – pin 13
   applicator → Servo 3 – pin 14
   inhaler    → Servo 4 – pin 15
-    
 
 SocketIO events
 ───────────────
@@ -31,10 +30,10 @@ TO   frontend  →  update_conveyor | update_servo | update_sensor
                   status_snapshot (relayed to browser)
 """
 import datetime
+import sqlite3
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
-from ProgramManager.config import normalize_conveyor_db_id
-from Dashboard.Database import ( 
+from Dashboard.Database import (
     init_db,get_conveyors, save_conveyor,get_servos,
     save_servo, reset_all_servos,get_counts,increment_count,increment_unsorted,
     get_unrecognized, increment_unrecognized,get_recent_events,
@@ -47,10 +46,12 @@ serial_manager = SerialManager()
 app      = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+_arduino_connected = False  # updated from Pi socket events (no USB serial on dashboard)
+
 def _arduino_status():
     return {
-        "connected": serial_manager.available,
-        "port": serial_manager.port or "unknown",
+        "connected": _arduino_connected,
+        "port":      serial_manager.port or "unknown",
     }
 
 def _dashboard_emit(event, data):
@@ -95,20 +96,19 @@ lamp_state = {
 _active_banner_errors = {}
 
 NOMINAL_WARNING = ("System OK")
-DISCONNECT_WARNING = "⚠ Arduino disconnected — conveyors are disabled."
-
+DISCONNECT_WARNING = "Arduino disconnected — conveyors are disabled."
 
 def is_arduino_connected():
     """Check if Arduino is currently connected."""
-    return serial_manager.available
+    return _arduino_connected
+
 
 
 def _current_warning():
     """Banner text for HTTP initial load (matches live socket behaviour)."""
-    if not serial_manager.available:
-        return _err_mgr().raise_error("SERIAL_NOT_CONNECTED")
-    else:
-        return {"message": NOMINAL_WARNING, "is_error": False}
+    if not is_arduino_connected():
+        return {"message": DISCONNECT_WARNING, "is_error": True}
+    return {"message": NOMINAL_WARNING, "is_error": False}
 
 def _emit_counts():
     socketio.emit("update_counts", {
@@ -160,20 +160,29 @@ def digital_twin():
 
 @app.route("/api/state")
 def api_state():
-    return jsonify({
-        "conveyors":            list(get_conveyors().values()),
-        "servos":               list(get_servos().values()),
-        "servo_definitions":    SERVO_DEFINITIONS,
-        "counts":               get_counts(),
-        "unrecognized":         get_unrecognized(),
-        "session_start":        get_session_start(),
-        "recent_events":        get_recent_events(limit=50, categories=LOGGED_CATEGORIES),
-        "arduino_status":       _arduino_status(),
-        "lamps":                lamp_state,
-        "warning":              _current_warning(),
-        "active_errors":        list(_active_banner_errors.values()),
-        "rate":                 compute_sorting_rate(),
-    })
+    try:
+        return jsonify({
+            "conveyors":            list(get_conveyors().values()),
+            "servos":               list(get_servos().values()),
+            "servo_definitions":    SERVO_DEFINITIONS,
+            "counts":               get_counts(),
+            "unrecognized":         get_unrecognized(),
+            "session_start":        get_session_start(),
+            "recent_events":        get_recent_events(limit=50, categories=LOGGED_CATEGORIES),
+            "arduino_status":       _arduino_status(),
+            "lamps":                lamp_state,
+            "warning":              _current_warning(),
+            "active_errors":        list(_active_banner_errors.values()),
+            "rate":                 compute_sorting_rate(),
+            "db_ok":                True,
+        })
+    except sqlite3.Error as exc:
+        print(f"[DASHBOARD] database error: {exc}")
+        return jsonify({
+            "error":   "database_unavailable",
+            "message": str(exc),
+            "db_ok":   False,
+        }), 503
 
 # ── WebSocket latency test ─────────────────────────────────────────────────
 
@@ -186,35 +195,29 @@ def test_latency(data):
 
 @socketio.on("control_conveyor")
 def handle_conveyor_control(data):
-    conv_id = normalize_conveyor_db_id(data.get("id"))
     running = data.get("command") == "start"
 
     if not is_arduino_connected():
-        _err_mgr().raise_error("CONTROL_CONVEYOR_BLOCKED", {"conveyor_id": conv_id,})
+        _err_mgr().raise_error("CONTROL_CONVEYOR_BLOCKED", {"conveyor_id": 1})
         return
 
-    conveyors = get_conveyors()
-    log_event("conveyor",f"Conveyor system {'started' if running else 'stopped'}",f"triggered_by={conv_id}")
-    # One physical motor — keep dashboard conveyors 1 & 2 aligned in DB and UI
-    for cid in (1, 2):
-        save_conveyor(cid, running)
-        socketio.emit("update_conveyor", {
-            "id":          cid,
-            "running":     running,
-            "force_motor": cid == conv_id,
-        })
+    log_event("conveyor", f"Conveyor {'started' if running else 'stopped'}", "conveyor_1")
+    save_conveyor(1, running)
+    socketio.emit("update_conveyor", {
+        "id":          1,
+        "running":     running,
+        "force_motor": True,
+    })
 
 
 # ── Conveyor state relay  (Pi ACK → server → browser) ────────────────────────
 
 @socketio.on("conveyor_state")
 def handle_conveyor_state(data):
-
-    conv_id = normalize_conveyor_db_id(data.get("id", "conveyor_1"))
     running = bool(data.get("running", False))
-    save_conveyor(conv_id, running)
+    save_conveyor(1, running)
     socketio.emit("update_conveyor", {
-        "id":      conv_id,
+        "id":      1,
         "running": running,
     })
 
@@ -294,19 +297,21 @@ def handle_servo_object_detected(data):
 
 @socketio.on("arduino_connection")
 def handle_arduino_connection(data):
+    global _arduino_connected
+    _arduino_connected = bool(data.get("connected"))
     timestamp = data.get("timestamp", datetime.datetime.now().isoformat())
     log_event("system",
-              f"Arduino {'CONNECTED' if _arduino_status()['connected'] else 'DISCONNECTED'}",
-              f"port={_arduino_status()['port']}")
+              f"Arduino {'CONNECTED' if _arduino_connected else 'DISCONNECTED'}",
+              f"port={data.get('port') or serial_manager.port or 'unknown'}")
 
-    if not _arduino_status()["connected"]:
+    if not _arduino_connected:
         _clear_servo_display()
     else:
         _err_mgr().resolve_error("CONTROL_CONVEYOR_BLOCKED")
 
     socketio.emit("arduino_status", {
-        "connected": _arduino_status()["connected"],
-        "port": _arduino_status()["port"],
+        "connected": _arduino_connected,
+        "port":      data.get("port") or serial_manager.port or "unknown",
         "timestamp": timestamp,
         "warning": _current_warning(),
         "conveyors": list(get_conveyors().values())
@@ -464,7 +469,7 @@ def on_connect(auth=None):
             "running": conv.get("running", False)
         })
 
-    show_servo_active = _arduino_status()["connected"]
+    show_servo_active = _arduino_connected
     for servo_type, servo_data in servos.items():
         if servo_type in SERVO_DEFINITIONS:
             info = SERVO_DEFINITIONS[servo_type]
