@@ -159,14 +159,10 @@
   <div class="card-title">Conveyors</div>
 
   <!-- Single control button for both conveyors -->
-  <button class="conveyor-action-btn start-btn" id="conveyor-main-btn" onclick="toggleConveyor(1)" style="width:100%; margin-bottom:0.85rem;">
+  <button class="conveyor-action-btn start-btn" id="conveyor-main-btn" onclick="toggleConveyor(1)">
     Start
   </button>
-<div class="card rate-card">
-      <div class="card-title">Sorting Rate</div>
-      <div class="rate-value" id="sorting-rate">0</div>
-      <div class="rate-unit">Device / min</div>
-    </div>
+<div></div>
   <div class="conveyor-list">
     <div class="conveyor-item" id="conveyor-1-item">
       <button class="conveyor-status-btn stopped" id="conveyor-1-led">
@@ -198,7 +194,7 @@
     <div class="card servo-card">
       <div class="card-title">Servo Motors</div>
       <div class="servo-list">
-
+        
         <!-- Servo 1 — Canister -->
         <div class="servo-item" id="servo-canister">
           <div class="servo-icon-wrap inactive">
@@ -317,24 +313,24 @@
 </div><!-- end .dashboard -->
 </div><!-- end .dashboard-main -->
 
-<!-- ── SIDEBAR: Event Log ── -->
-<div class="dashboard-sidebar" id="debug-log-panel">
-  <div class="card log-sidebar-card">
-    <div class="card-title debug-control-header">
-      <span>Event Log</span>
-      <div class="debug-control-btn">
-        <button onclick="clearLogDisplay()" style="font-size:0.65rem;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;">Clear</button>
+<!-- ── BOTTOM: Event Log ── -->
+<div class="dashboard-log-bar" id="debug-log-panel">
+  <div class="card log-bar-card">
+    <div class="log-bar-header">
+      <div class="card-title debug-control-header">
+        <span>Event Log</span>
+        <div class="debug-control-btn">
+          <button onclick="clearLogDisplay()" class="log-clear-btn">Clear</button>
+        </div>
       </div>
-    </div>
-
-    <!-- Filter bar -->
-    <div class="log-filter-bar">
-      <button class="log-filter-btn active" data-filter="all">All</button>
-      <button class="log-filter-btn" data-filter="detection">Detection</button>
-      <button class="log-filter-btn" data-filter="servo">Servo</button>
-      <button class="log-filter-btn" data-filter="sensor">Sensor</button>
-      <button class="log-filter-btn" data-filter="conveyor">Conveyor</button>
-      <button class="log-filter-btn" data-filter="error">Error</button>
+      <div class="log-filter-bar">
+        <button class="log-filter-btn active" data-filter="all">All</button>
+        <button class="log-filter-btn" data-filter="detection">Detection</button>
+        <button class="log-filter-btn" data-filter="servo">Servo</button>
+        <button class="log-filter-btn" data-filter="sensor">Sensor</button>
+        <button class="log-filter-btn" data-filter="conveyor">Conveyor</button>
+        <button class="log-filter-btn" data-filter="error">Error</button>
+      </div>
     </div>
 
     <div id="event-log-table-wrap">
@@ -352,7 +348,7 @@
       </table>
     </div>
   </div>
-</div><!-- end .dashboard-sidebar -->
+</div><!-- end .dashboard-log-bar -->
 
 </div><!-- end .dashboard-layout -->
 

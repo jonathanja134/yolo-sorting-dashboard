@@ -25,7 +25,7 @@ from ProgramManager.serialManager import SerialManager, serial_reader
 from ProgramManager.socketManager import SocketManager
 from ProgramManager.Buffer import BufferManager,configure_buffer_manager
 from ProgramManager.config import ( labels, num_classes, bbox_colors,input_size, conf_thresh, nms_thresh, min_frames, gap_limit,Yolo_model,
-                                    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT,CENTER_X_MIN, CENTER_X_MAX, CONVEYOR_1_STOP_COOLDOWN)
+                                    LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT)
 from ProgramManager.ErrorManager import get_error_manager
 
 # ── Model paths 
@@ -117,14 +117,16 @@ print("~ 2 Model loaded OK")
 
 # ── Camera 
 picam = Picamera2()
-picam.configure(picam.create_video_configuration(
-    main={"size": (input_size, input_size), "format": "RGB888"}
-))
-picam.set_controls({
-    "AeEnable": False,          # disable auto-exposure
-    "AnalogueGain": 3,        # ISO-equivalent: 1.0 = ISO 100, 8.0 ≈ ISO 800
-    "ExposureTime": 18000,      # microseconds (10ms here — adjust to your lighting)
-})
+picam.configure(picam.create_video_configuration(main={"size": (input_size, input_size), "format": "RGB888"}))
+picam.set_controls({"AeEnable": False,"AnalogueGain": 3,"ExposureTime": 10000,}) # camera ISP settings
+
+ #Wider FOV: crop the full sensor width into a square, then scale to input_size
+sensor_w, sensor_h = picam.sensor_resolution
+crop_size = min(sensor_w, sensor_h)   # largest square = widest FOV
+x = (sensor_w - crop_size) // 2
+y = (sensor_h - crop_size) // 2
+picam.set_controls({"ScalerCrop": (x, y, crop_size, crop_size)})
+
 picam.start()
 print("~ 3 Camera OK")
 
@@ -208,7 +210,7 @@ encoded_lock = threading.Lock()
 encode_event = threading.Event()
 
 STREAM_WIDTH   = 480
-STREAM_HEIGHT  = 480
+STREAM_HEIGHT  = 320
 STREAM_QUALITY = 35       # JPEG quality implicitto reduced  for speed
 
 def encoder_thread_fn():
@@ -264,7 +266,6 @@ threading.Thread(target=lambda: asyncio.run(run_ws_server()), daemon=True).start
 
 fps_buffer = []
 prev_t     = None
-last_conveyor1_stop_ts = 0.0 
 
 try:
     while True:
@@ -312,26 +313,15 @@ try:
             )
             detections = [detections[i] for i in keep]
 
-        # ── Feed buffer/Centre-trigger: stop conveyor 1 if object is centred during actuation 
+        # ── Feed buffer 
         if detections:
             best = max(detections, key=lambda d: d[4])
             cid  = int(best[5])
             cat  = LABEL_TO_CATEGORY.get(cid, "unrecognized").lower()
-
-            # Compute centre X in original frame space, then map to input_size space
-            cx_px = (best[0] + best[2]) / 2          # centre X in frame pixels (w0)
-            cx_norm = cx_px / w0                      # normalise 0‥1
-            cx_input = cx_norm * input_size            # map to input_size space
-
-            now_ts = time.time()
-            if (CENTER_X_MIN <= cx_input <= CENTER_X_MAX
-                    and (now_ts - last_conveyor1_stop_ts) > CONVEYOR_1_STOP_COOLDOWN):
-                serial.send("CONVEYOR:1:STOP")
-                last_conveyor1_stop_ts = now_ts
-
             buf_mgr.add(cat, weight=float(best[4]))
         else:
             buf_mgr.no_detection()
+
         # ── Detection draw 
         for d in detections:
             x1, y1, x2, y2, conf, cid = d

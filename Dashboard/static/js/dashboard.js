@@ -498,11 +498,11 @@ socket.on('servo_closed', (data) => {
 });
 socket.on('buffer_update',      (data) => renderDebugPanel(data));
 socket.on('new_detection',      (data) => {
-  if (data.category === 'unrecognized' || debugEnabled) {
-    appendLogRow(data.timestamp, 'detection',
-      `Detected '${data.category}'`,
-      `confidence=${Math.round(data.confidence * 100)}% frames=${data.total_frames}`);
-  }
+  const label = data.label || data.category || 'unknown';
+  const details = data.category === 'unrecognized'
+    ? `confidence=${Math.round(data.confidence * 100)}% frames=${data.total_frames}`
+    : `category=${data.category} confidence=${Math.round(data.confidence * 100)}% frames=${data.total_frames}`;
+  appendLogRow(data.timestamp, 'detection', `Detected '${label}'`, details);
   if (data.category === 'unrecognized') {
     const label = data.label || data.display || 'unrecognized';
     showUnrecognized(`Unrecognized object detected: ${label}`);

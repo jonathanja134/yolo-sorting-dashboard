@@ -131,7 +131,6 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
 
             is_motor_ack  = len(parts) >= 3 and parts[0] == "ACK" and parts[1].startswith("MOTOR")
             is_system_ack = len(parts) == 3 and parts[0] == "ACK" and parts[1] == "SYSTEM"
-            is_conveyor_break = len(parts) == 4 and parts[0] == "ACK" and parts[1] == "CONVEYOR"
             if is_motor_ack or is_system_ack:
                 running = parts[2] in ("FORWARD", "STARTED")
                 label   = "DASHBOARD BUTTON" if is_motor_ack else "ARDUINO BUTTON"
@@ -142,6 +141,7 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                     emit_fn("conveyor_state", {"id": conv_id, "running": running})
 
                 motor_running = running
+                error_mgr.resolve_error("ARDUINO_SYSTEM_IS_NOT_RUNNING")
                 lamp_state_updates = {}
 
                 if lamp_state.get("green") != running:
@@ -157,12 +157,7 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                     emit_fn("lamp_update", lamp_state)
 
                 continue
-            if is_conveyor_break:
-                conv_id = f"conveyor_{parts[2]}"          
-                running = parts[3] in ("STARTED", "RESTARTED")
-                multi_motor_state_setter(conv_id, running)
-                emit_fn("conveyor_state", {"id": conv_id, "running": running})
-                continue
+
             # label ack
             if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "LABEL":
                 category = parts[2].lower()
@@ -170,24 +165,23 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                 continue
 
             # UV ack
-            if len(parts) >= 3 and parts[0] == "ACK" and parts[1] == "UV":
-                state = parts[2]
-                reason = parts[3] if len(parts) > 3 else None
-
-                if state in ("ON", "OFF"):
-                    uv_on = (state == "ON")
+            if len(parts) == 3 and parts[0] == "ACK" and parts[1] == "UV":
+                if parts[2] == "ON" or parts[2] == "OFF":
+                    uv_on = parts[2] == "ON"
                     error_mgr.resolve_error("UV_BLOCKED")
-                    if lamp_state.get("blue") != uv_on:
-                        lamp_state["blue"] = uv_on
-                        emit_fn("lamp_update", lamp_state)
-
-                    if reason:
-                        print(f"UV {state}: {reason}")
+                    if lamp_state.get('blue') != uv_on:
+                        lamp_state['blue'] = uv_on
+                        emit_fn('lamp_update', lamp_state)
                     continue
-                
-                elif state == "BLOCKED":
-                    error_mgr.raise_error("UV_BLOCKED",{"reason": reason} if reason else None)
+                if parts[2] == "BLOCKED":
+                    error_mgr.raise_error("UV_BLOCKED")
                     continue
+            if len(parts) == 4 and parts[0] == "ACK" and parts[4] == "DOOR_OPEN" or parts[4]=="SWITCHED":
+                if parts[4] =="DOOR_OPEN":
+                    error_mgr.raise_error("UV_BLOCKED")
+                if parts[4] =="SWITCHED":
+                    error_mgr.resolve_error("UV_BLOCKED")
+                continue
             # servo events
             if len(parts) >= 3 and parts[0] == "SERVO":
                 try:
@@ -229,6 +223,8 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
                         "servo_type":  category,
                         "servo_index": servo_idx,
                         })
+                        time.sleep(10)
+                        error_mgr.resolve_error("UNSORTED")
                     else:
                         error_mgr.resolve_error("UNSORTED")
                     set_active_servo(None, 0.0)
@@ -286,7 +282,9 @@ def serial_reader(serial_manager, emit_fn, buffer_manager, servo_index_to_catego
         except Exception as e:
             print(f"[SERIAL] read error: {e}")
             error_mgr.raise_error("SERIAL_DEVICE_UNREACHABLE", {"exception": str(e)})
-            time.sleep(0.05)
+            time.sleep(1)
+            error_mgr.resolve_error("SERIAL_DEVICE_UNREACHABLE")
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────

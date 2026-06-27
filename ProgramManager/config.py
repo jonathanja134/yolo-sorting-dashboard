@@ -3,7 +3,7 @@
 # ── YOLO LABELS 
 # can be replaced by "yolo11sV0", "yolo11nV1", "yolo26nV2", "yolo26nV3" or a personal model inside /my_model_ncnn_model
 
-Yolo_model = "yolo26nV3"
+Yolo_model = "yolo26nV3.2"
 
 # ── YOLO LABELS 
 
@@ -74,12 +74,12 @@ SERVO_COLOR = {
 # ── MODEL / INFERENCE SETTINGS 
 
 input_size = 320
-conf_thresh = 0.8
+conf_thresh = 0.5
 nms_thresh = 0.45
 
 # ── BUFFER SETTINGS 
 
-min_frames = 20
+min_frames = 10
 gap_limit = 20
 
 # ── SERIAL SETTINGS 

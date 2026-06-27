@@ -44,17 +44,14 @@ def configure_buffer_manager(buffer_manager):
     _buf_mgr = buffer_manager
 
 class DetectionBuffer:
-    """
-    Low-level vote accumulator. No collecting flag — always active.
-    All methods must be called with the caller holding buf_lock.
-    """
+    "Vote accumulator always active"
 
     def __init__(self):
         self.votes: list[tuple[str, float]] = []
         self.gap_counter: int = 0
 
     def reset(self):
-        """Wipe votes and gap counter. Collection continues immediately."""
+        "Wipe votes and gap counter. Collection continues immediately."
         self.votes       = []
         self.gap_counter = 0
 
@@ -62,8 +59,7 @@ class DetectionBuffer:
         self.votes.append((category, weight))
         self.gap_counter = 0
 
-    # ── Read-only helpers ──────────────────────────────────────────────────────
-
+    # helpers 
     @property
     def frame_count(self) -> int:
         return len(self.votes)
@@ -71,9 +67,6 @@ class DetectionBuffer:
     def snapshot_votes(self) -> list[str]:
         """Return a plain list of category names (no weights)."""
         return [v[0] for v in self.votes]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 
 class BufferManager:
     """
