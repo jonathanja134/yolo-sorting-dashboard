@@ -1,73 +1,50 @@
 """
-Buffer.py – Always-on majority-vote detection buffer.
+Buffer.py – Uses the majority vote buffer to compile the best match for the detected device.
 
-Collection never stops. Commits are triggered ONLY by gap_limit consecutive empty frames → commit if >= min_frames, wipe (fallback)
-
-Rule: Only one database entry per sensor commit. The add() method never
-auto-commits; it just accumulates frames for better accuracy. Commits only happen when explicitly triggered (sensor or manual clear).
-
-    # In the inference loop:
-    buffer_mgr.add(category, weight=confidence)
-    buffer_mgr.no_detection()
-
-    # On SENSOR:1:TRIGGERED (pin 12):
-    buffer_mgr.handle_pin12()
+Commits are triggered by gap_limit consecutive empty frames 
+    => commit if counted frame is above min_frames, then reset the buffer
 """
 
-import threading
-import time
+import threading,time 
 from collections import Counter
 
 _buf_mgr = None
 
-
+# configure_buffer_manager change the function holder from none to buffer_manager for normal operation
 def configure_buffer_manager(buffer_manager):
     global _buf_mgr
     _buf_mgr = buffer_manager
 
 class DetectionBuffer:
-    "Vote accumulator always active"
-
+    "Vote accumulator which is always active"
     def __init__(self):
         self.votes: list[tuple[str, float]] = []
         self.gap_counter: int = 0
-
+    
     def reset(self):
-        "Wipe votes and gap counter. Collection continues immediately."
+        "Reset the votes and gap counter and then collection continues "
         self.votes       = []
         self.gap_counter = 0
-
+    
     def add(self, category: str, weight: float = 1.0):
+        "Process the finished detection window asynchronously."
         self.votes.append((category, weight))
         self.gap_counter = 0
 
-    # helpers 
     @property
     def frame_count(self) -> int:
+        "Return the number of buffered frame"
         return len(self.votes)
-
+    
     def snapshot_votes(self) -> list[str]:
-        """Return a plain list of category names (no weights)."""
+        "Return a plain list of category names (no weights) to clean the data"
         return [v[0] for v in self.votes]
 
 class BufferManager:
     """
-    High-level manager wrapping DetectionBuffer.
-
-    Commit triggers (ONLY these cause database entries):
-      - handle_pin12() : fires on SENSOR:1:TRIGGERED if frame_count >= min_frames
-      - handle_clear() : fires on manual clear (keyboard 'C'), commits whatever gathered
-      - no_detection() : fires when gap_counter reaches gap_limit (fallback if no sensor)
-
-    The add() method only accumulates frames, it never auto-commits. This ensures
-    exactly one database entry per sensor trigger event, eliminating duplicates when
-    the same object remains in view for multiple frames after triggering.
-
-    After every commit the buffer is wiped atomically (under lock, before the
-    commit thread starts) so new detections never race into a stale window.
-
+    High-level manager that handle the wrapped data from DetectionBuffer.
+    After every commit the buffer is reset automically so new detections never race into a stale window.
     """
-
     def __init__(
         self,
         min_frames:       int,
@@ -87,74 +64,46 @@ class BufferManager:
         self._buf  = DetectionBuffer()
         self._lock = threading.Lock()
 
-        # Rule 4: set True after a pin12 commit; cleared when the gap signals
-        # the object has left so the next pin12 event is treated as new.
-        self._Already_committed = False
-
-    # ── Public API (called from yolo_reader.py) ────────────────────────────────
+    # PUBLIC API called from yolo_detect_ncnn_headless.py 
 
     def add(self, category: str, weight: float = 1.0):
-        """
-        Record a detection for this frame.
-        No auto-commit. Only sensor trigger (handle_pin12) or manual clear 
-        (handle_clear) can commit. This ensures one database entry per sensor trigger.
-        """
+        "Record a detection for this frame with lock safe ensuring one function only edits the data"
         with self._lock:
             self._buf.add(category, weight)
-
         self._emit_state()
 
     def no_detection(self):
-        """
-        Record that this frame had no detection above threshold.
-        Normal behaviour: commits if gap_limit is reached and votes exist.
-        """
-    
+        "Record empty detection frames then commits if gap_limit is reached and votes exist."
         snapshot = None
         with self._lock:
             self._buf.gap_counter += 1
             gap = self._buf.gap_counter
-
+            #if the gap is bove the gap limit and frame>0 therefore it saves the votes in snapshot 
             if gap >= self._gap_limit and self._buf.frame_count > 0:
                 snapshot = list(self._buf.votes)
                 self._buf.reset()
-
         self._emit_state()
-
+        
         if snapshot is not None:
+            #the saved snapshot gets commited if not null
             print(f"[BUFFER] gap limit reached -> commit ({len(snapshot)} frames)")
             self._trigger_commit(snapshot)
 
-    # ── handle_clear ────────────────────────────
-
-    def handle_clear(self):
-        """
-        Commits whatever was gathered (regardless of min_frames), then wipes.
-        """
-        snapshot = None
-        with self._lock:
-            if self._buf.frame_count > 0:
-                snapshot = list(self._buf.votes)
-                self._buf.reset()
-
-        if snapshot:
-            self._trigger_commit(snapshot)
-        self._emit_state()
-
-    # ── Internal helpers ───────────────────────────────────────────────────────
+    # INTERNAL HELPERS
 
     def _trigger_commit(self, votes: list[tuple[str, float]]):
+        "on ._trigger_commit(snapshot) a thread start to fire _comit and compute the votes without performance loss"
         threading.Thread(target=self._commit, args=(votes,), daemon=True).start()
-
     def _commit(self, votes: list[tuple[str, float]]):
+        "thread sending the votes result to the yolo program "
         result = self._compute_result(votes)
-
+        # if no result return 
         if result is None:
             print("[COMMIT] empty buffer — skipped")
             return
 
         print(f"[COMMIT] {result}")
-
+        # in case of low confidence result data are still send for log but servo aren't triggered
         if result["low_confidence"]:
             print("[COMMIT] low confidence")
             self._emit("yolo_detection", {
@@ -169,11 +118,11 @@ class BufferManager:
         category   = result["winner"]
         confidence = result["confidence"]
 
-        # Servo overlay: shown until Arduino confirms close (10 s safety cap)
-        self._set_active_servo(category, time.time() + 10.0)
+        self._set_active_servo(category, time.time() + 10.0)#10 seconds safety cap
 
+        #Send the category result thought the serial to the arduino for actuation using the serial protocal 
         self._serial_send(f"LABEL:{category}")
-
+        #send detection to the dashboard for log 
         self._emit("yolo_detection", {
             "label":        category,
             "confidence":   confidence,
@@ -181,8 +130,9 @@ class BufferManager:
             "breakdown":    result["breakdown"],
             "total_frames": result["total_frames"],
         })
+        # send live detection to the dahsbord 
         self._emit("buffer_update", {
-            "collecting":   True,   # always collecting
+            "collecting":   True,  
             "committed":    True,
             "winner":       category,
             "confidence":   confidence,
@@ -193,8 +143,9 @@ class BufferManager:
             "breakdown":    result["breakdown"],
             "leader":       category,
         })
-
+    
     def _emit_state(self):
+        "function that triggers the buffer update on each frames"
         with self._lock:
             votes = list(self._buf.votes)
             gap   = self._buf.gap_counter
@@ -211,9 +162,9 @@ class BufferManager:
         })
 
     def _compute_result(self, votes: list[tuple[str, float]]) -> dict | None:
+        "Compute the result of the votes called by _emit_state for live preview and _commit for final descision"
         if not votes:
             return None
-
         c            = Counter()
         total_weight = 0.0
         for cat, w in votes:
@@ -233,19 +184,21 @@ class BufferManager:
             "low_confidence": len(votes) < self._min_frames,
         }
 
-    # ── Read-only accessors (for the inference loop overlay) ──────────────────
+    #  Read-only accessors for the inference loop overlay
 
     @property
     def collecting(self) -> bool:
+        "collection is always active on the overlay"
         return True 
 
     @property
     def gap_counter(self) -> int:
+        "returns the gap counter for the overlay"
         with self._lock:
             return self._buf.gap_counter
 
     def snapshot(self) -> tuple[bool, list[str], int]:
-        """Returns (collecting, vote_categories, gap_counter) for the CV overlay."""
+        "Returns (collecting, vote_categories, gap_counter) for the CV overlay."
         with self._lock:
             return (
                 True,

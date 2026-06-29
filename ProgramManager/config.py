@@ -1,11 +1,10 @@
 # ─────────────────────  Config ──────────────────────────
 
-# ── YOLO LABELS 
-# can be replaced by "yolo11sV0", "yolo11nV1", "yolo26nV2", "yolo26nV3" or a personal model inside /my_model_ncnn_model
-
+# YOLO MODEL 
+# can be replaced by "yolo11sV0", "yolo11nV1", "yolo26nV2", "yolo26nV3" or another model inside /my_model_ncnn_model
 Yolo_model = "yolo26nV3.2"
 
-# ── YOLO LABELS 
+# YOLO LABELS 
 
 labels = [
     "Applicator A",
@@ -31,14 +30,13 @@ bbox_colors = [
 ]
 
 DEVICE_COLORS = {
-    "canister":   (211, 211, 211),# light blue
+    "canister":   (211, 211, 211),# light gray
     "chemical":   (42, 42, 165), # dark blue
-    "applicator": (230, 216, 173),# light blue
-    "inhaler":    (139, 0, 0),
+    "applicator": (230, 216, 173),# light orange
+    "inhaler":    (139, 0, 0), # dark blue
 }
 
-# ── MAPPINGS 
-
+# MAPPINGS 
 LABEL_TO_CATEGORY = {
     0: "applicator",
     1: "applicator",
@@ -71,39 +69,37 @@ SERVO_COLOR = {
     "inhaler":    (80, 255, 200),
 }
 
-# ── MODEL / INFERENCE SETTINGS 
-
+# MODEL / INFERENCE SETTINGS 
 input_size = 320
 conf_thresh = 0.5
 nms_thresh = 0.45
 
-# ── BUFFER SETTINGS 
-
+# BUFFER SETTINGS 
 min_frames = 10
 gap_limit = 20
 
-# ── SERIAL SETTINGS 
-BAUD = 115200
+# SERIAL SETTINGS 
+BAUD = 115200 
 PORT = "/dev/ttyACM0"
 SOCKET_PORT = 5000
 # Use 127.0.0.1 (not localhost) so Pi with dashboard connection worksion works with no Ethernet/Wi‑Fi
 DASHBOARD_URL = "http://127.0.0.1:5000"
 
-# ── CONVEYOR (single physical motor, pin 10) ──
+# CONVEYOR 
+# single software motor controller, pin 10 driving both conveyors
 CONVEYOR_ID = "conveyor_1"
 CONVEYOR_PIN = 10
 CONVEYOR_PINS = {CONVEYOR_ID: CONVEYOR_PIN}
 
-# ── CONVEYOR 1 centre-trigger window
+# CONVEYOR 1 centre-trigger window
 CENTER_X_MIN = 130   
 CENTER_X_MAX = 190  
 CONVEYOR_STOP_COOLDOWN = 1.5  # seconds between stop commands
 
 def normalize_conveyor_db_id(raw, default=1):
-    """DB / dashboard DOM id — always 1 (conveyor_1)."""
+    " we only have one conveyor so the id is always 1 "
     return 1
 
-
 def conveyor_socket_id(db_id=None):
-    """String id for Pi motor state."""
+    "String id for Pi motor state ; we only have one conveyor so the id is always conveyor_1"
     return CONVEYOR_ID

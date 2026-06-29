@@ -5,21 +5,18 @@ SERIAL_NOT_CONNECTED         | SERIAL_DEVICE_UNREACHABLE     | SERIAL_PARSE_ERRO
 SERIAL_UNRECOGNIZED_LINE     | MOTOR_FEEDBACK_MISMATCH       | SERVO_NOT_WIRED 
 UNSORTED                     | ARDUINO_SYSTEM_IS_NOT_RUNNING | ARDUINO_SYSTEM_UNKNOWN_CMD      
 DATABASE_CONNECTION_FAILED   | SOCKET_DISCONNECTED           | CONTROL_CONVEYOR_BLOCKED
-ARDUINO_PULSE_OUT_OF_RANGE   | ESTOP_ACTIVE                  | ESTOP_CLEARED                
-UNKNOWN_ERROR                | UV_BLOCKED
+ESTOP_ACTIVE                 | ESTOP_CLEARED   | UNKNOWN_ERROR      | UV_BLOCKED
 """
 
-
 class ErrorSeverity(Enum):
-    """Error severity levels."""
+    "Error severity levels."
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
 
-
 class ErrorSource(Enum):
-    """Error source categories."""
+    "Error source categories."
     ARDUINO = "arduino"
     SERIAL = "serial"
     SYSTEM = "system"
@@ -29,9 +26,8 @@ class ErrorSource(Enum):
     BUFFER = "buffer"
     DATABASE = "database"
 
-
 ERROR_CATALOG = {
-    # ─── SERIAL / CONNECTION ────────────────────────────────────────────────────
+    # SERIAL / CONNECTION ERRORS
     "SERIAL_NOT_CONNECTED": {
         "code": "SERIAL_001",
         "severity": ErrorSeverity.ERROR,
@@ -64,7 +60,7 @@ ERROR_CATALOG = {
         "message": "Received an unrecognised line from Arduino.",
         "action": "Check serial protocol and firmware version.",
     },
-    # ─── ARDUINO HARDWARE ─────────────────────────────────────────────────────
+    # ARDUINO HARDWARE ERRORS
     "SERVO_NOT_WIRED": {
         "code": "SERVO_005",
         "severity": ErrorSeverity.ERROR,
@@ -97,14 +93,6 @@ ERROR_CATALOG = {
         "message": "Cannot perform action: system is not running.",
         "action": "Start the system to enable this action.",
     },
-    "ARDUINO_PULSE_OUT_OF_RANGE": {
-        "code": "ARDUINO_002",
-        "severity": ErrorSeverity.ERROR,
-        "source": ErrorSource.ARDUINO,
-        "title": "Arduino Pulse Out of Range",
-        "message": "Calculated servo pulse is out of safe range.",
-        "action": "Check servo configuration and mechanical limits.",
-    },
     "ARDUINO_SYSTEM_UNKNOWN_CMD": {
         "code": "ARDUINO_001",
         "severity": ErrorSeverity.ERROR,
@@ -113,7 +101,7 @@ ERROR_CATALOG = {
         "message": "Arduino reported an error.",
         "action": "Check Arduino serial output and firmware.",
     },
-    # ─── BUFFER / DETECTION LOGIC ───────────────────────────────────────────────
+    # BUFFER / DETECTION LOGIC ERRORS
     "LOW_CONFIDENCE": {
         "code": "BUFFER_001",
         "severity": ErrorSeverity.INFO,
@@ -130,7 +118,7 @@ ERROR_CATALOG = {
         "message": "Object could not be classified.",
         "action": "Remove or reposition the object.",
     },
-    # ─── DATABASE ─────────────────────────────────────────────────────────────
+    # DATABASE ERRORS
     "DATABASE_CONNECTION_FAILED": {
         "code": "DATABASE_001",
         "severity": ErrorSeverity.ERROR,
@@ -139,7 +127,7 @@ ERROR_CATALOG = {
         "message": "Failed to connect to database.",
         "action": "Check database availability and credentials.",
     },
-    # ─── SYSTEM / DASHBOARD ───────────────────────────────────────────────────
+    # SYSTEM / DASHBOARD ERRORS
     "SOCKET_DISCONNECTED": {
         "code": "SYSTEM_001",
         "severity": ErrorSeverity.WARNING,

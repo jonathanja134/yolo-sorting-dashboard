@@ -1,7 +1,7 @@
 """
-app.py  –  Flask + SocketIO backend for the Sorting Control Dashboard.
+app.py  –  Flask and SocketIO backend for the Sorting Control Dashboard.
 
-Canonical servo / category mapping:
+ Servo / category mapping:
   canister   → Servo 1 – pin 12
   chemical   → Servo 2 – pin 13
   applicator → Servo 3 – pin 14

@@ -10,6 +10,13 @@ const int   EEPROM_ADDR[NB_SERVOS]      = { 0, 1, 2, 3 };
 const int   SERVO_CHANNELS[NB_SERVOS]   = { S_MOTOR_12, S_MOTOR_13, S_MOTOR_14, S_MOTOR_15 };
 const char* CATEGORY_NAMES[NB_SERVOS]   = { "canister", "chemical", "applicator", "inhaler" };
 
+// Zone 1 = canister (0) + applicator (2) — upstream, right side
+// Zone 2 = chemical (1) + inhaler (3)    — downstream, left side
+const int ZONE[NB_SERVOS] = { 1, 2, 1, 2 };
+
+// Overlap wait before closing current and opening next in same zone
+const unsigned long OVERLAP_Z1 = 500;
+const unsigned long OVERLAP_Z2 = 3000;
 
 int  servoPos[NB_SERVOS];
 int  homePos[NB_SERVOS];
@@ -17,9 +24,15 @@ bool servoOpen[NB_SERVOS]  = {};
 bool servoWired[NB_SERVOS] = {};
 bool motorRunning           = false;
 
-// Global actuation state
-bool inActuation = false;
+// Per-zone actuation state — needed because Z2 active + Z1 new is a free case
+// where both zones can operate independently at the same time
+bool inActuationZ1 = false;
+bool inActuationZ2 = false;
 
+// Per-zone queued label (-1 = empty)
+// Max depth 1 per zone — conveyor spacing makes deeper queue unnecessary
+int queuedIdxZ1 = -1;
+int queuedIdxZ2 = -1;
 
 bool systemRunning      = false;
 bool eStopActive        = false;
@@ -47,7 +60,7 @@ Sensor sensors[1] = { { 1, POS_SENSOR_1, LOW, LOW, false, 0 } };
 
 uint16_t angleToPulse(int angle) {
   angle = constrain(angle, 0, 180);
-  angle = 180 - angle; // upside down servo
+  angle = 180 - angle; //upside down servo
   return map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
 }
 
@@ -61,12 +74,26 @@ void moveServo(int idx, int angle) {
   servoPos[idx] = angle;
 }
 
-// Returns true if the orange lamp should be on
+bool isZone1(int idx) { return ZONE[idx] == 1; }//  upstream zone
+bool isZone2(int idx) { return ZONE[idx] == 2; }//  downstrem zone
+
+// Returns true if the zone of idx is currently in actuation
+bool zoneActive(int idx) {
+  return isZone1(idx) ? inActuationZ1 : inActuationZ2;
+}
+
+// Returns the currently open servo index in a zone (-1 if none)
+int activeServoInZone(int zone) {
+  for (int i = 0; i < NB_SERVOS; i++) {
+    if (ZONE[i] == zone && servoOpen[i]) return i;
+  }
+  return -1;
+}
+//return orange lanp status
 void updateOrangeLamp() {
   digitalWrite(ORANGE_LAMP_PIN, (!systemRunning && !eStopActive) ? HIGH : LOW);
 }
-
-// UV INTERLOCK
+//UV INTERLOCK
 void readDoorSwitches() {
   bool d1 = digitalRead(DOOR_SWITCH_1), d2 = digitalRead(DOOR_SWITCH_2);
   bool newDoor1Closed = (d1 == LOW), newDoor2Closed = (d2 == LOW);
@@ -87,7 +114,7 @@ void readDoorSwitches() {
   }
 }
 
-// UV BUTTON
+// UV BUTTON 
 void readUVButton() {
   bool reading = digitalRead(UV_BUTTON_PIN);
 
@@ -110,14 +137,14 @@ void readUVButton() {
   }
 }
 
-// SERVO WIRING CHECK
+//SERVO WIRING CHECK 
 bool checkServoWired(int idx) {
-  uint16_t pulse = angleToPulse(CLOSED_POS);
-  // Send the servo PWM command
+  uint16_t pulse = angleToPulse(CLOSED_POS);  
+  // send the servo PWN command
   pwm.setPWM(SERVO_CHANNELS[idx], 0, pulse);
   delay(20);
   uint16_t readOff = pwm.getPWM(SERVO_CHANNELS[idx], 1);
-  // Read servo feedback and send faulty if not readable
+  // Read servo feedback and send faulty if not readable 
   if (readOff < SERVO_CHECK_MIN_PULSE || readOff > SERVO_CHECK_MAX_PULSE) {
     Serial.println("ERR:SERVO:FAULT");
     return false;
@@ -128,7 +155,7 @@ bool checkServoWired(int idx) {
 // E-STOP READER
 void readEStop() {
   bool safe = digitalRead(ESTOP_PIN);
-  // If E-stop pressed/pulled turn on estop state and turn off everything else
+  // if E-stop pressed/pulled turn on estop state and turn off everyything else (only software since the current already got physically disconnected)
   if (!safe && !eStopActive) {
     eStopActive   = true;
     systemRunning = false;
@@ -138,15 +165,17 @@ void readEStop() {
     digitalWrite(MotorFw,     LOW);
     digitalWrite(UV_LAMP_PIN, LOW);
 
-    // Clear actuation state immediately — safety takes priority
-    inActuation = false;
-
-    // Move each servo back to closed position
+    // Close everything immediately queues are voided because safety takes the priority
+    inActuationZ1 = false;
+    inActuationZ2 = false;
+    queuedIdxZ1   = -1;
+    queuedIdxZ2   = -1;
+    //move each servo back to close position, although command will be physicaly done on E-stop clear 
     for (int i = 0; i < NB_SERVOS; i++) {
       moveServo(i, CLOSED_POS);
       servoOpen[i] = false;
     }
-
+    //print for log status and dashboard status 
     Serial.println("ESTOP:ACTIVE");
   }
 
@@ -156,8 +185,9 @@ void readEStop() {
   }
 }
 
-// MOTOR CONTROL
+//MOTOR CONTROL 
 void startSystemMotor() {
+  //not procedded if e-stop active therefore send error for debugging
   if (eStopActive) { Serial.println("ERR:ESTOP:ACTIVE"); return; }
 
   digitalWrite(MotorFw, HIGH);
@@ -183,7 +213,10 @@ void stopSystemMotor(bool closeServos) {
   digitalWrite(UV_LAMP_PIN, LOW);
   Serial.println("ACK:UV:OFF");
 
-  // Abort any pending actuation
+  // delete the queues when system stopped so pending actuations are aborted
+  queuedIdxZ1 = -1;
+  queuedIdxZ2 = -1;
+
   if (closeServos) {
     for (int i = 0; i < NB_SERVOS; i++) {
       moveServo(i, CLOSED_POS);
@@ -194,7 +227,7 @@ void stopSystemMotor(bool closeServos) {
   updateOrangeLamp();
 }
 
-// START/STOP BUTTON
+// START/STOP BUTTON 
 void readStartStopButton() {
   bool reading = digitalRead(START_STOP_PIN);
 
@@ -217,7 +250,7 @@ void readStartStopButton() {
   }
 }
 
-// SENSOR
+// SENSOR 
 void updateSensor(Sensor &s) {
   unsigned long now     = millis();
   bool          reading = digitalRead(s.pin);
@@ -242,12 +275,23 @@ void readSensors() {
   updateSensor(sensors[0]);
 }
 
-// ACTUATION
+//ACTUATION 
 
+// Shared overlap wait that keeps checking E-stop so safety is never blocked during the delay
+bool overlapWait(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    readEStop();
+    if (eStopActive) return false;
+    delay(10);
+  }
+  return true;
+}
 
-// Core servo actuation: open, wait for sensor, close
+// Core servo actuation open, wait for sensor, close
+// Called after any overlap handling is done
 void runServo(int idx) {
-  Sensor &s   = sensors[0];
+  Sensor &s  = sensors[0];
   s.triggered = false;
   int openPos = getOpenPos(idx);
 
@@ -259,11 +303,10 @@ void runServo(int idx) {
 
   delay(SERVO_OPEN_MS);
 
-  // Wait for end-of-line sensor — used to log whether object was sorted
-  // Servos 0-1 use TIMEOUT_1, servos 2-3 use TIMEOUT_2
-  unsigned long start    = millis();
+  // Wait for end-of-line sensor — only used to log whether object was sorted
+  unsigned long start   = millis();
   bool          detected = false;
-  unsigned long timeout  = (idx < 2) ? TIMEOUT_1 : TIMEOUT_2;
+  unsigned long timeout  = isZone2(idx) ? TIMEOUT_2 : TIMEOUT_1;
 
   while (millis() - start < timeout) {
     readEStop();
@@ -281,26 +324,86 @@ void runServo(int idx) {
                  ":CHANNEL:"  + String(SERVO_CHANNELS[idx]));
 }
 
-// Entry point for all actuation from readSerial
+// Handles all zone logic before delegating to runServo
+// This is the only entry point for actuation from readSerial
 void actuateServo(int idx) {
-  // If already actuating, close the current servo immediately and interrupt it
-  if (inActuation) {
-    for (int i = 0; i < NB_SERVOS; i++) {
-      if (servoOpen[i]) {
-        moveServo(i, CLOSED_POS);
-        servoOpen[i] = false;
-      }
-    }
-    inActuation = false;
-  }
+  int  zone        = ZONE[idx];
+  bool &inActZone  = (zone == 1) ? inActuationZ1 : inActuationZ2;
+  int  &queuedZone = (zone == 1) ? queuedIdxZ1   : queuedIdxZ2;
 
-  // Run the new servo immediately
-  inActuation = true;
+  int  otherZone        = (zone == 1) ? 2 : 1;
+  bool &inActOtherZone  = (zone == 1) ? inActuationZ2 : inActuationZ1;
+  int  &queuedOtherZone = (zone == 1) ? queuedIdxZ2   : queuedIdxZ1;
+
+  //CASE: when the same zone is already active 
+  if (inActZone) {
+    // if there is a queued zone, do nothing
+    if (queuedZone != -1) { return;}
+    // set the queued zone to the current zone if there are no already active object
+    queuedZone = idx;
+    return;
+  }
+  // CASE: when the opposite zone is active (Z1 new, Z2 active or Z2 new, Z1 active) 
+  if (inActOtherZone) {
+    if (zone == 1) {
+      // Z2 active + Z1 new physically no overlap so both run freely
+      // Z1 actuation starts without waiting for Z2 to finish
+      inActZone = true;
+      runServo(idx);
+      inActZone = false;
+
+      // Execute Z1 queue if one was waiting
+      if (queuedZone != -1 && !eStopActive) {
+        int next    = queuedZone;
+        queuedZone  = -1;
+        unsigned long ov = OVERLAP_Z1;
+        if (overlapWait(ov)) {
+          runServo(next);
+        }
+      }
+      return;
+    } else {
+      // Z1 active + Z2 new then Z1 is upstream so we close it and drop any Z1 queued  before opening any Z2 servo
+      int activeZ1 = activeServoInZone(1);
+      if (queuedOtherZone != -1) {
+        queuedOtherZone = -1;
+      }
+      if (activeZ1 != -1) {
+        moveServo(activeZ1, CLOSED_POS);
+        servoOpen[activeZ1] = false;
+        inActOtherZone = false;
+      }
+      // Now open Z2 normally
+      inActZone = true;
+      runServo(idx);
+      inActZone = false;
+
+      if (queuedZone != -1 && !eStopActive) {
+        int next   = queuedZone;
+        queuedZone = -1;
+        if (overlapWait(OVERLAP_Z2)) {
+          runServo(next);
+        }
+      }
+      return;
+    }
+  }
+  // CASE zone free then normal actuation 
+  inActZone = true;
   runServo(idx);
-  inActuation = false;
+  // After closing, we check if a same-zone object was queued during actuation
+  while (queuedZone != -1 && !eStopActive) {
+    int next   = queuedZone;
+    queuedZone = -1;
+    unsigned long ov = (zone == 1) ? OVERLAP_Z1 : OVERLAP_Z2;
+    if (!overlapWait(ov)) break; // E-stop fired during overlap wait
+    runServo(next);
+  }
+  inActZone = false;
 }
 
 // SERIAL PROTOCOL READER
+
 void readSerial() {
   if (!Serial.available()) return;
   String rawCmd = Serial.readStringUntil('\n');
@@ -314,12 +417,12 @@ void readSerial() {
   key.trim(); arg.trim();
   key.toUpperCase(); arg.toUpperCase();
 
-  // Read MOTOR:FORWARD and MOTOR:STOP
+   //read MOTOR:FORWARD and MOTOR:STOP
   if (key == "MOTOR") {
     if (arg == "FORWARD") {
       startSystemMotor();
       Serial.println("ACK:SYSTEM:STARTED");
-    } else if (arg == "STOP") {
+    } else if (arg =="STOP"){
       stopSystemMotor(true);
       Serial.println("ACK:SYSTEM:STOPPED");
     } else {
@@ -330,7 +433,7 @@ void readSerial() {
   if (eStopActive)    { Serial.println("ERR:ESTOP:ACTIVE"); return; }
   if (!systemRunning) { Serial.println("ERR:SYSTEM:IS_NOT_RUNNING"); return; }
 
-  // Past this point serial key must be LABEL, unknown command otherwise
+  //past this point serial key must be LABEL , unknow command otherwise 
   if (key != "LABEL") { Serial.println("ERR:SYSTEM:UNKNOWN_CMD"); return; }
 
   String category = arg;
@@ -340,16 +443,16 @@ void readSerial() {
   for (int i = 0; i < NB_SERVOS; i++) {
     if (category == CATEGORY_NAMES[i]) { idx = i; break; }
   }
-  // Return an error if the category arg is not recognised
+  //return an error CATEGORY if the categorie arg is not recognized
   if (idx == -1) {
-    Serial.println("ERR:BAD_CATEGORY:" + String(category)); return;
+    Serial.println("ERR:BAD_CATEGORY:" + String(category)); return; 
   }
-  // Return an error if the servo is not wired
+  //return an error if any servo is not wired
   if (!servoWired[idx]) {
     Serial.println("ERR:SERVO:" + String(idx + 1) + ":NOT_WIRED:CATEGORY:" + String(CATEGORY_NAMES[idx]));
     return;
   }
-  // Acknowledge and actuate
+  //if no error triggerd then feedback showcase acknoledgement 
   Serial.println("ACK:LABEL:" + String(category));
   actuateServo(idx);
 }
@@ -365,9 +468,9 @@ void setup() {
   pinMode(PULLDOWN_R, OUTPUT); digitalWrite(PULLDOWN_R, LOW);
 
   pinMode(POS_SENSOR_1,    INPUT);
-  digitalWrite(MotorFw,         LOW); pinMode(MotorFw,         OUTPUT);
-  digitalWrite(ORANGE_LAMP_PIN, HIGH);pinMode(ORANGE_LAMP_PIN, OUTPUT);
-  digitalWrite(UV_LAMP_PIN,     LOW); pinMode(UV_LAMP_PIN,     OUTPUT);
+  digitalWrite(MotorFw,         LOW); pinMode(MotorFw,         OUTPUT); 
+  digitalWrite(ORANGE_LAMP_PIN, HIGH);pinMode(ORANGE_LAMP_PIN, OUTPUT); 
+  digitalWrite(UV_LAMP_PIN,     LOW); pinMode(UV_LAMP_PIN,     OUTPUT); 
   pinMode(UV_BUTTON_PIN,   INPUT_PULLUP);
   pinMode(START_STOP_PIN,  INPUT_PULLUP);
   pinMode(ESTOP_PIN,       INPUT_PULLUP);
@@ -388,7 +491,6 @@ void setup() {
 
   Serial.println("========= Sorting System Ready =========");
 }
-
 void loop() {
   readEStop();
   readStartStopButton();

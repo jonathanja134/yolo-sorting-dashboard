@@ -6,13 +6,7 @@ from ProgramManager.config import BAUD, CONVEYOR_ID
 from ProgramManager.ErrorManager import get_error_manager
 
 # Shared lamp state (serial_reader updates; SocketManager re-syncs on reconnect)
-_lamp_state = {
-    "red":    False,
-    "green":  False,
-    "orange": False,
-    "blue":   False,
-}
-
+_lamp_state = {"red":False, "green":False, "orange":False, "blue":False,}
 
 def get_lamp_state() -> dict:
     return dict(_lamp_state)
@@ -308,7 +302,7 @@ class SerialManager:
     Manages the serial connection to the Arduino.
 
     Key design decisions
-    ────────────────────
+    
     • Uses threading.RLock so the reconnect thread can call connect() while
       already holding the lock (fixes the previous non-reentrant deadlock).
     • _disconnect() is the single place that tears down the connection and
@@ -318,7 +312,6 @@ class SerialManager:
     • After a successful reconnect the RX buffer is flushed so stale bytes
       from the previous session can't corrupt the first message.
     """
-
     # How long to pause between reconnect attempts (seconds)
     _RECONNECT_INTERVAL = 2.0
     # How long to wait for the Arduino to finish booting after opening the port
@@ -377,7 +370,7 @@ class SerialManager:
                 continue
         return None
 
-    # ── INTERNAL HELPERS ──────────────────────────────────────────────────────
+    # INTERNAL HELPERS 
 
     def _disconnect(self):
         """Tear down the current connection (safe to call multiple times)."""
@@ -411,7 +404,7 @@ class SerialManager:
             print(f"[SERIAL WARNING] Could not open {port}: {e}")
             return False
 
-    # ── AUTO RECONNECT ────────────────────────────────────────────────────────
+    # AUTO RECONNECT 
 
     def _auto_reconnect_loop(self):
         """
@@ -448,7 +441,7 @@ class SerialManager:
             except Exception:
                 time.sleep(1.0)
 
-    # ── PUBLIC API ────────────────────────────────────────────────────────────
+    # PUBLIC API 
 
     def connect(self, port: str | None = None, emit_fn=None):
         error_mgr = get_error_manager(emit_fn)

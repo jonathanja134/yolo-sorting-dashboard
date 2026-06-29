@@ -28,17 +28,17 @@ from ProgramManager.config import ( labels, num_classes, bbox_colors,input_size,
                                     LABEL_TO_CATEGORY, SERVO_INDEX_TO_CATEGORY, BAUD, PORT, DASHBOARD_URL)
 from ProgramManager.ErrorManager import get_error_manager
 
-# ── Model paths 
+# Model paths 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 model_dir  = os.path.join(script_dir, "my_model_ncnn_model",Yolo_model)
 param_file = os.path.join(model_dir, "model.ncnn.param")
 bin_file   = os.path.join(model_dir, "model.ncnn.bin")
 
-# ── Serial (Pi ↔ Arduino) 
+# Serial (Pi <=> Arduino) 
 serial = SerialManager(baud=BAUD)
 print("~ 0 Serial Manager created")
 
-# ── Conveyor motor state (conveyor_1 / pin 10) ──
+# Conveyor motor state (conveyor_1 / pin 10) 
 motor_running = False
 motor_lock    = threading.Lock()
 
@@ -51,7 +51,7 @@ def _set_conveyor_state(running):
     with motor_lock:
         motor_running = running
 
-# ── SocketIO → dashboard (before model load so startup errors are delivered) ───
+# SocketIO → dashboard (before model load so startup errors are delivered) 
 socket_mgr = SocketManager(
     server_url=DASHBOARD_URL,
     get_conveyor_fn=_get_conveyor_state,
@@ -71,7 +71,7 @@ else:
     print("~ 1 Dashboard SocketIO not connected — errors will queue")
 
 error_mgr = get_error_manager(_async_emit)
-# ── Load NCNN model 
+# Load NCNN model 
 net = ncnn.Net()
 net.opt.num_threads         = 4
 net.opt.use_fp16_packed     = True
@@ -98,12 +98,12 @@ if net.load_model(bin_file) != 0:
 error_mgr.resolve_error("MODEL_LOAD_FAILED")
 print("~ 2 Model loaded OK")
 
-# ── Camera 
+# Camera 
 picam = Picamera2()
 picam.configure(picam.create_video_configuration(main={"size": (input_size, input_size), "format": "RGB888"}))
 picam.set_controls({"AeEnable": False,"AnalogueGain": 3,"ExposureTime": 10000,}) # camera ISP settings
 
- #Wider FOV: crop the full sensor width into a square, then scale to input_size
+ #Wider FOV to crop the full sensor width into a square, then scale to input_size
 sensor_w, sensor_h = picam.sensor_resolution
 crop_size = min(sensor_w, sensor_h)   # largest square = widest FOV
 x = (sensor_w - crop_size) // 2
@@ -113,11 +113,11 @@ picam.set_controls({"ScalerCrop": (x, y, crop_size, crop_size)})
 picam.start()
 print("~ 3 Camera OK")
 
-# ── Connect Serial after ErrorManager is ready 
+# Connect Serial after ErrorManager is ready 
 serial.connect(port=PORT, emit_fn=_async_emit)
 print("~ 4 Serial connection attempted")
 
-# ── Active servo state 
+# Active servo state 
 active_servo       = None
 active_servo_lock  = threading.Lock()
 active_servo_until = 0.0
@@ -132,7 +132,7 @@ def _set_active_servo(category, until_ts):
         active_servo       = category
         active_servo_until = until_ts
 
-# ── Buffer Manager 
+# Buffer Manager 
 buf_mgr = BufferManager(
     min_frames       = min_frames,
     gap_limit        = gap_limit,
@@ -143,7 +143,7 @@ buf_mgr = BufferManager(
 )
 configure_buffer_manager(buf_mgr)
 
-# ── Serial reader thread 
+# Serial reader thread 
 threading.Thread(
     target=serial_reader,
     kwargs={
@@ -156,7 +156,7 @@ threading.Thread(
     daemon=True,
 ).start()
 
-# ── Non-Maximum Suppression
+# Non-Maximum Suppression
 def nms(boxes, scores, threshold):
     if len(boxes) == 0:
         return []
@@ -181,7 +181,7 @@ def nms(boxes, scores, threshold):
         order = order[np.where(ovr <= threshold)[0] + 1]
     return keep
 
-# ── Encoder thread (WebSocket) 
+# Encoder thread (WebSocket) 
 
 encoder_running = True
 latest_frame = None
@@ -217,7 +217,7 @@ def encoder_thread_fn():
 
 threading.Thread(target=encoder_thread_fn, daemon=True).start()
 
-# ── WebSocket server 
+# WebSocket server 
 async def yolo_handler(ws):
     print(f"WS client: {ws.remote_address}")
     last_sent_seq = -1   # ← track which seq this client last received
@@ -233,7 +233,7 @@ async def yolo_handler(ws):
                 except asyncio.TimeoutError:
                     pass
 
-            await asyncio.sleep(0.033)  
+            await asyncio.sleep(0.033) 
     except websockets.exceptions.ConnectionClosed:
         pass
 
@@ -244,7 +244,7 @@ async def run_ws_server():
 
 threading.Thread(target=lambda: asyncio.run(run_ws_server()), daemon=True).start()
 
-# ── Main inference loop 
+# Main inference loop 
 
 fps_buffer = []
 prev_t     = None
@@ -254,7 +254,7 @@ try:
         loop_start = time.time()
         frame = picam.capture_array()
         h0, w0 = frame.shape[:2]
-        # ── NCNN inference 
+        # NCNN inference 
         frame_resized = cv2.resize(frame, (input_size, input_size))
         frame_resized = np.ascontiguousarray(frame_resized)
 
@@ -293,16 +293,18 @@ try:
             )
             detections = [detections[i] for i in keep]
 
-        # ── Feed buffer 
+        # Feed buffer 
+        # with the detected device category (or unrecognized ) and weight using the .add() function
         if detections:
             best = max(detections, key=lambda d: d[4])
             cid  = int(best[5])
             cat  = LABEL_TO_CATEGORY.get(cid, "unrecognized").lower()
             buf_mgr.add(cat, weight=float(best[4]))
         else:
+            # in case of no detected device we feed the gap limit using .no_detectlion()
             buf_mgr.no_detection()
 
-        # ── Detection draw 
+        # Detection draw 
         for d in detections:
             x1, y1, x2, y2, conf, cid = d
             cid = int(cid)
@@ -310,10 +312,9 @@ try:
             cat   = LABEL_TO_CATEGORY.get(cid, "?").lower()
             lbl   = f"{labels[cid]} [{cat}] {int(conf*100)}%"
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, lbl, (x1, max(y1-5, 10)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.putText(frame, lbl, (x1, max(y1-5, 10)),cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        # ── Buffer overlay  
+        # Buffer overlay  
         collecting, votes_snap, gap_snap = buf_mgr.snapshot()
         if collecting:
             c_snap = Counter(votes_snap)
@@ -324,7 +325,7 @@ try:
                 pct = int(n/total*100) if total else 0
                 cv2.putText(frame, f"  {cat}: {n} ({pct}%)",(10, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,255,200), 1)
 
-        # ── FPS counter 
+        # FPS counter 
         elapsed = time.time() - loop_start
         now = time.time()
         if prev_t is not None:
@@ -335,7 +336,7 @@ try:
         avg_fps = sum(fps_buffer) / len(fps_buffer) if fps_buffer else 0.0
         cv2.putText(frame, f"FPS: {avg_fps:.1f}",(10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
 
-        # ── Push clean frame to WebSocket encoder 
+        # Push clean frame to WebSocket encoder 
         with frame_lock:
             latest_frame = frame.copy()
         encode_event.set()

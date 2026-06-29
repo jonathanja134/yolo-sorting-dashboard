@@ -9,8 +9,6 @@ images_captured/
 *.jpg
 *.png
 *.log
-Quantize.py
-export_onnx.py
 note.ipynb
 system-site-packages
 

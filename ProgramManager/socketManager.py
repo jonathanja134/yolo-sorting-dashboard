@@ -66,12 +66,12 @@ class SocketManager:
                 self._apply_dashboard_motor_command(requested)
                 return
 
-            # Arduino / status relay — update state only, never write serial
+            # Arduino / status relay update state only
             self.set_conveyor_fn(requested)
             self._motor_physically_running = requested
 
     def _apply_dashboard_motor_command(self, running):
-        """Dashboard Start/Stop toggles the shared motor on pin 10."""
+        "Dashboard STOP motors"
         self.set_conveyor_fn(running)
 
         if running == self._motor_physically_running:
@@ -112,7 +112,7 @@ class SocketManager:
                 time.sleep(3)
 
     def wait_until_connected(self, timeout=20.0):
-        """Block until connected to the dashboard (for startup error delivery)."""
+        "Block operation until connected to the dashboard for startup error "
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self.sio.connected:

@@ -1,14 +1,9 @@
-// ══════════════════════════════════════════
-//  SORTING DASHBOARD — dashboard.js
-//  Categories: applicator | inhaler | chemical | canister
-// ══════════════════════════════════════════
-
-// ── CLOCK ──
+// ── CLOCK 
 function updateClock() {document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');}
 setInterval(updateClock, 1000);
 updateClock();
 
-// ── CATEGORY CONFIG ──
+// ── CATEGORY CONFIG 
 const CATEGORIES = ['canister', 'chemical', 'applicator', 'inhaler','unsorted'];
 
 const CAT_COLORS = {
@@ -22,7 +17,7 @@ const CAT_COLORS = {
 
 
 
-// ── PIE CHART ──
+// ── PIE CHART 
 const pieCtx = document.getElementById('pieChart').getContext('2d');
 const pieChart = new Chart(pieCtx, {
   type: 'doughnut',
@@ -49,9 +44,9 @@ const pieChart = new Chart(pieCtx, {
   }
 });
 
-// ── LOCAL STATE ──
+// ── LOCAL STATE 
 const counts = { canister: 0, chemical: 0, applicator: 0, inhaler: 0, unsorted: 0 };
-// ── CONVEYOR — one motor (conveyor_1); UI shows two status rows ──
+// ── CONVEYOR one motor (conveyor_1); UI shows two status rows
 const UI_CONVEYOR_IDS = [1, 2];
 const BACKEND_CONVEYOR_ID = 1;
 const conveyorState = { 1: 'stopped', 2: 'stopped' };
@@ -128,7 +123,7 @@ let arduinoConnected = false;
 const activeErrors = {};
 const DISCONNECT_WARNING = '⚠ Arduino disconnected — conveyors are disabled.';
 
-// ── UPDATE COUNTERS ──
+// ── UPDATE COUNTERS 
 function updateCounts(data) {
   const c = data.counts || data;
   Object.assign(counts, c);
@@ -167,7 +162,7 @@ function updateCounts(data) {
   }
 }
 
-// ── SERVO ──
+// ── SERVO 
 
 function setServoState(type, active) {
   if (active && !arduinoConnected) return;
@@ -199,7 +194,7 @@ function setServoState(type, active) {
   }
 }
 
-// ── STATUS LAMPS ──
+// ── STATUS LAMPS 
 function setLamps(data) {
   if (!data) return;
   const names = ['red', 'orange', 'green', 'blue'];
@@ -212,7 +207,7 @@ function setLamps(data) {
   });
 }
 
-// ── WARNING ──
+// ── WARNING 
 function setWarning(message, isError) {
   const el = document.getElementById('warning-message');
   if (!el) return;
@@ -326,9 +321,7 @@ function showUnrecognized(message) {
   }, 6000);
 }
 
-// ══════════════════════════════════════════
 //  DEBUG PANEL
-// ══════════════════════════════════════════
 let debugEnabled = false;
 
 function toggleDebug() {
@@ -349,13 +342,13 @@ function renderDebugPanel(data) {
 
   const statusEl = document.getElementById('dbg-status');
   if (data.committed) {
-    statusEl.textContent = `✅ COMMITTED → ${data.winner}  (${Math.round(data.confidence * 100)}%)`;
+    statusEl.textContent = `COMMITTED → ${data.winner}  (${Math.round(data.confidence * 100)}%)`;
     statusEl.className   = 'dbg-status committed';
   } else if (data.collecting) {
-    statusEl.textContent = `● COLLECTING`;
+    statusEl.textContent = `COLLECTING`;
     statusEl.className   = 'dbg-status collecting';
   } else {
-    statusEl.textContent = `◌ IDLE`;
+    statusEl.textContent = `IDLE`;
     statusEl.className   = 'dbg-status idle';
   }
 
@@ -407,9 +400,7 @@ function renderDebugPanel(data) {
   });
 }
 
-// ══════════════════════════════════════════
 //  EVENT LOG
-// ══════════════════════════════════════════
 
 const MAX_LOG_ROWS = 100;
 
@@ -451,14 +442,12 @@ function populateLogFromHistory(events) {
   oldest_first.forEach(e => appendLogRow(e.timestamp, e.category, e.action, e.details, false));
 }
 
-// ══════════════════════════════════════════
 //  SOCKET.IO
-// ══════════════════════════════════════════
 const socket = io();
 window.socket = socket;
 
 socket.on('connect', () => {
-  console.log('Connected to Flask server ✅');
+  console.log('Connected to Flask server');
   document.querySelector('.live-dot').style.background = '#22c55e';
 });
 
@@ -467,7 +456,7 @@ socket.on('disconnect', () => {
   document.querySelector('.live-dot').style.background = '#ef4444';
 });
 
-socket.on('update_counts',      (data) => updateCounts(data));
+socket.on('update_counts',   (data) => updateCounts(data));
 socket.on('update_conveyor', (data) => {
   const state = data.running ? 'running' : 'stopped';
   applyConveyorSystemState(state);
@@ -495,12 +484,9 @@ socket.on('error_resolved', (data) => {
   delete activeErrors[data.error_key || data.code];
   refreshWarningBanner();
 });
-socket.on('lamp_update', (data) => setLamps(data));
-socket.on('update_servo', (data) => {
-  setServoState(data.type, data.active);
-});
-socket.on('servo_closed', (data) => {
-  setServoState(data.type, false);
+socket.on('lamp_update' , (data) => setLamps(data));
+socket.on('update_servo', (data) => { setServoState(data.type, data.active);});
+socket.on('servo_closed', (data) => { setServoState(data.type, false);
   if (debugEnabled) appendLogRow(new Date().toISOString(), 'servo',
     `Servo ${data.type} deactivated`,
     data.status || '');
@@ -566,7 +552,7 @@ async function loadInitialState() {
     refreshWarningBanner();
     updateCounts({ ...data.counts, rate: data.rate, unrecognized: data.unrecognized });
     if (data.lamps) setLamps(data.lamps);
-    console.log('Initial state loaded ✅');
+    console.log('Initial state loaded');
     if (data.recent_events) populateLogFromHistory(data.recent_events);
   } catch (e) {
     console.warn('Could not load initial state:', e);

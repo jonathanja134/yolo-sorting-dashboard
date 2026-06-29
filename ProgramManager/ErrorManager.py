@@ -1,43 +1,38 @@
 """
-ErrorManager.py – Centralized error definitions and handlers for the sorting system.
-
-Severity rules (dashboard):
-  INFO     → log sidebar only (system_log)
-  WARNING+ → banner (cumulative single line) + log sidebar (system_error)
+ErrorManager.py is the centralized error definitions and handlers for the sorting system.
+ 
+INFO : only log into the sidebar no error apear on the warning banner 
+WARNING+ :appear on the cumulative error banner as well as on on the log sidebar
 """
 
 from enum import Enum
 from datetime import datetime
 from ProgramManager.ErrorLibrary import ERROR_CATALOG, ErrorSeverity
 
-
-
 def _severity_value(severity) -> str:
     return severity.value if isinstance(severity, ErrorSeverity) else severity
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Error Manager Class
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ERROR MANAGER CLASS
 class ErrorManager:
-    """Central error handler and tracker."""
+    "Central error handler and tracker"
 
     def __init__(self, emit_fn=None):
         self.emit_fn = emit_fn
-        self.active_errors = {}   # error_key -> error_dict
+        self.active_errors = {}
         self.error_history = []
-        self._pending = []        # [(event, payload), ...] before emit_fn is set
+        self._pending = []
 
     def set_emit_fn(self, emit_fn):
-        """Attach dashboard emit callback and flush queued events."""
+        "Attach the dashboard emit callback and reset the queued events."
         self.emit_fn = emit_fn
         self.replay_pending()
 
     def get_error_def(self, error_code: str) -> dict:
+        "Return the error code from the error catalog is available or Unknown"
         return ERROR_CATALOG.get(error_code, ERROR_CATALOG["UNKNOWN_ERROR"])
 
     def _build_error_obj(self, error_code: str, details=None) -> dict:
+        "return dictionary containing all the triggered data error  "
         if error_code not in ERROR_CATALOG:
             error_code = "UNKNOWN_ERROR"
 
@@ -59,13 +54,14 @@ class ErrorManager:
         }
 
     def _emit_or_queue(self, event: str, payload: dict):
+        "buffers for the event either emits or queue an event if emit in use"
         if self.emit_fn:
             self.emit_fn(event, payload)
         else:
             self._pending.append((event, payload))
 
     def replay_pending(self):
-        """Emit queued events and refresh active banner errors after connect."""
+        "Emit queued events and refresh active banner errors after connect."
         if not self.emit_fn:
             return
 
@@ -85,7 +81,7 @@ class ErrorManager:
                 self.emit_fn("system_error", err)
 
     def raise_error(self, error_code: str, details: dict = None) -> dict:
-        """Raise WARNING+ / ERROR / CRITICAL — banner + log."""
+        "Raise all the warnning error WARNING / ERROR / CRITICAL and log INFO"
         if error_code not in ERROR_CATALOG:
             error_code = "UNKNOWN_ERROR"
 
@@ -101,7 +97,7 @@ class ErrorManager:
         return error_obj
 
     def log_info(self, error_code: str, details: dict = None) -> dict:
-        """Log INFO severity — sidebar only, not banner."""
+        "Log INFO severity only no banner display"
         if error_code not in ERROR_CATALOG:
             error_code = "UNKNOWN_ERROR"
 
@@ -112,6 +108,7 @@ class ErrorManager:
         return error_obj
 
     def resolve_error(self, error_code: str):
+        "resoler for error when triggered"
         if error_code in self.active_errors:
             self.active_errors.pop(error_code)
             self._emit_or_queue("error_resolved", {
@@ -122,15 +119,18 @@ class ErrorManager:
             print(f"[RESOLVED] {error_code}")
 
     def has_critical_error(self) -> bool:
+        "return true on critical error"
         for error in self.active_errors.values():
             if error["severity"] == ErrorSeverity.CRITICAL.value:
                 return True
         return False
 
     def get_active_errors(self) -> list:
+        "return a list of all active servo"
         return list(self.active_errors.values())
 
     def get_error_history(self, limit: int = 100) -> list:
+        "return the 100 latest error"
         return self.error_history[-limit:]
 
 
@@ -138,6 +138,7 @@ _global_error_manager = None
 
 
 def get_error_manager(emit_fn=None) -> ErrorManager:
+    "func that returns error manager Class"
     global _global_error_manager
     if _global_error_manager is None:
         _global_error_manager = ErrorManager(emit_fn)

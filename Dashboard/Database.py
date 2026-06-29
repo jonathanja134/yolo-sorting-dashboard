@@ -13,21 +13,12 @@ def _connect() -> sqlite3.Connection:
         os.makedirs(db_dir, exist_ok=True)
     return sqlite3.connect(DB_PATH, timeout=30.0)
 
-# ══════════════════════════════════════════
-#  CATEGORIES
-# ══════════════════════════════════════════
-# applicator  – Servo 3
-# inhaler     – Servo 4
-# chemical    – Servo 2
-# canister    – Servo 1
 CATEGORIES = ["applicator", "inhaler", "chemical", "canister"]
 
 LAMP_KEYS = ("red", "orange", "green", "blue")
 _DEFAULT_LAMPS = {k: False for k in LAMP_KEYS}
 
-# ══════════════════════════════════════════
 #  INITIALIZATION
-# ══════════════════════════════════════════
 
 def init_db():
     """Create tables if they don't exist yet (safe to run on existing DB)."""
@@ -109,9 +100,7 @@ def init_db():
     conn.close()
 
 
-# ══════════════════════════════════════════
 #  STATUS LAMPS (local SQLite — no network)
-# ══════════════════════════════════════════
 
 def get_lamps() -> dict:
     conn = _connect()
@@ -138,9 +127,7 @@ def save_lamps(lamps: dict) -> dict:
     return state
 
 
-# ══════════════════════════════════════════
 #  CONVEYORS
-# ══════════════════════════════════════════
 
 def get_conveyors():
     conn = _connect()
@@ -162,7 +149,6 @@ def save_conveyor(conv_id, running):
 
 # ══════════════════════════════════════════
 #  SERVOS
-# ══════════════════════════════════════════
 
 def get_servos():
     conn = _connect()
@@ -185,9 +171,7 @@ def reset_all_servos():
     conn.close()
 
 
-# ══════════════════════════════════════════
 #  COUNTERS
-# ══════════════════════════════════════════
 
 def get_counts():
     conn = _connect()
@@ -234,9 +218,7 @@ def get_session_start():
     return row[0] if row else datetime.now().isoformat()
 
 
-# ══════════════════════════════════════════
 #  SENSOR 1 — sorting rate (objects / hour)
-# ══════════════════════════════════════════
 
 _SENSOR1_MAX = 200
 
@@ -284,9 +266,7 @@ def compute_sorting_rate(limit=10):
         window = 1.0
     return round((len(triggers) / window) * 3600)
 
-# ══════════════════════════════════════════
 #  EVENT HISTORY
-# ══════════════════════════════════════════
 
 def log_event(category, action, details=None):
 
