@@ -71,7 +71,7 @@ def _err_mgr():
 
 init_db()
 
-# ── Canonical servo definitions ───────────────────────────────────────────────
+#  Canonical servo definitions 
 SERVO_DEFINITIONS = {
     "canister":   {"label": "Servo 1 – Canister",   "index": 1},
     "chemical":   {"label": "Servo 2 – Chemical",   "index": 2},
@@ -84,7 +84,7 @@ KNOWN_CATEGORIES = set(SERVO_DEFINITIONS.keys())
 # Categories stored in the event log — used by the filter UI
 LOGGED_CATEGORIES = ["detection", "servo", "sensor", "conveyor", "error"]
 
-# ── Connection State Tracking ──────────────────────────────────────────────────
+#  Connection State Tracking 
 # Lamp states for status bar (red, orange, green, blue)
 lamp_state = {
     "red": False,
@@ -145,7 +145,7 @@ def _clear_servo_display():
         })
 
 
-# ── HTTP ──────────────────────────────────────────────────────────────────────
+# HTTP
 
 @app.route("/")
 def index():
@@ -184,14 +184,14 @@ def api_state():
             "db_ok":   False,
         }), 503
 
-# ── WebSocket latency test ─────────────────────────────────────────────────
+# WebSocket latency test 
 
 @socketio.on("test_latency")
 def test_latency(data):
     socketio.emit("latency_reply", data)
 
 
-# ── Conveyor control  (frontend → server → broadcast → Pi) ───────────────────
+#  Conveyor control  (frontend → server → broadcast → Pi) 
 
 @socketio.on("control_conveyor")
 def handle_conveyor_control(data):
@@ -210,7 +210,7 @@ def handle_conveyor_control(data):
     })
 
 
-# ── Conveyor state relay  (Pi ACK → server → browser) ────────────────────────
+#  Conveyor state relay  (Pi ACK → server → browser) 
 
 @socketio.on("conveyor_state")
 def handle_conveyor_state(data):
@@ -222,7 +222,7 @@ def handle_conveyor_state(data):
     })
 
 
-# ── Servo activation  (Arduino SERVO:OPEN → Pi → server → browser) ───────────
+#  Servo activation  (Arduino SERVO:OPEN → Pi → server → browser)
 # YOLO may emit servo_update with active=False or from_arduino=False — ignored for UI.
 # Deactivation is handled exclusively by servo_closed (Arduino feedback).
 
@@ -253,7 +253,7 @@ def handle_servo_update(data):
         "label":  servo_info["label"],
     })
 
-# ── Servo deactivation  (Arduino CLOSED_OK / CLOSED_TIMEOUT → Pi → server → browser) ──
+# Servo deactivation 
 @socketio.on("servo_closed")
 def handle_servo_closed(data):
     servo_type  = data.get("type")
@@ -279,7 +279,7 @@ def handle_servo_closed(data):
     })
 
 
-# ── Servo object detected  (informational relay) ──────────────────────────────
+#  Servo object detected  (informational relay)
 
 @socketio.on("servo_object_detected")
 def handle_servo_object_detected(data):
@@ -292,7 +292,7 @@ def handle_servo_object_detected(data):
     socketio.emit("servo_object_detected", data)
 
 
-# ── Arduino connection status (Pi tracking) ────────────────────────────────────
+#  Arduino connection status (Pi tracking) 
 # Shows when Arduino is connected / disconnected to disable/enable conveyor controls
 
 @socketio.on("arduino_connection")
@@ -318,28 +318,28 @@ def handle_arduino_connection(data):
     })
 
 
-# ── Label ACK relay ────────────────────────────────────────────────────────────
+#  Label ACK relay 
 
 @socketio.on("ack_label")
 def handle_ack_label(data):
     socketio.emit("ack_label", data)
 
 
-# ── STATUS snapshot relay  (Pi parsed STATUS: line -> browser) ─────────────────
+#  STATUS snapshot relay  (Pi parsed STATUS: line -> browser) 
 
 @socketio.on("status_snapshot")
 def handle_status_snapshot(data):
     socketio.emit("status_snapshot", data)
 
 
-# ── CHANGE event relay  (logging only) ────────────────────────────────────────
+# CHANGE event relay  (logging only)
 
 @socketio.on("change_event")
 def handle_change_event(data):
     socketio.emit("change_event", data)
 
 
-# ── Proximity sensor telemetry  (Pi -> server -> browser) ──────────────────────
+#  Proximity sensor telemetry  (Pi -> server -> browser) 
 
 @socketio.on("sensor_update")
 def handle_sensor_update(data):
@@ -366,15 +366,14 @@ def handle_unsorted_object_detected(data):
     })
     _emit_counts()
 
-# ── Buffer debug state  (Pi -> server -> browser, relay only) ──────────────────
+#Buffer debug state  (Pi -> server -> browser, relay only)
 
 @socketio.on("buffer_update")
 def handle_buffer_update(data):
     socketio.emit("buffer_update", data)
 
 
-# ── YOLO detection  (Pi -> server -> browser) ──────────────────────────────────
-
+#  YOLO detection 
 @socketio.on("yolo_detection")
 def handle_yolo_detection(data):
     raw_label    = data.get("label", "unrecognized")
@@ -409,7 +408,7 @@ def handle_yolo_detection(data):
     _emit_counts()
 
 
-# ── Connection lifecycle ──────────────────────────────────────────────────────
+# Connection lifecycle 
 
 @socketio.on("system_error")
 def handle_system_error_from_pi(data):
@@ -499,7 +498,7 @@ def on_disconnect(*args):
     pass
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# Entry point 
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=SOCKET_PORT, debug=False, use_reloader=False,allow_unsafe_werkzeug=True)
