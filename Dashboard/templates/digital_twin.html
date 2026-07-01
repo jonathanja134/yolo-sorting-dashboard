@@ -94,7 +94,7 @@ const socket = io();
 const statusEl = document.getElementById('conn-status');
 
 socket.on('connect', () => {
-  statusEl.textContent = 'Live — receiving new_detection / update_servo';
+  statusEl.textContent = 'Live — receiving committed detections / update_servo';
   statusEl.classList.add('live');
 });
 socket.on('disconnect', () => {
@@ -102,7 +102,21 @@ socket.on('disconnect', () => {
   statusEl.classList.remove('live');
 });
 
-socket.on('new_detection', (data) => twinBus.emit('new_detection', data));
+socket.on('buffer_update', (data) => {
+  if (!data || data.committed !== true) return;
+
+  const rawCategory = data.winner || data.leader || data.category || '';
+  const cat = normalizeCategory(rawCategory);
+  if (!KNOWN.has(cat)) return;
+
+  twinBus.emit('new_detection', {
+    category: cat,
+    label: displayType(cat),
+    confidence: data.confidence,
+    total_frames: data.total_frames,
+  });
+  simulateServoCycle(cat);
+});
 socket.on('update_servo', (data) => twinBus.emit('update_servo', data));
 
 window.triggerItem = function(category) {
@@ -270,9 +284,9 @@ new p5(function(p) {
     cnv.parent('sketch-container');
 
     arms.push(new ServoArm(200,  88, 'Canister',   'canister',   1, 'TR'));
-    arms.push(new ServoArm(200, 138, 'Chemical',   'chemical',   2, 'BL'));
-    arms.push(new ServoArm(400,  88, 'Applicator', 'applicator', 3, 'TR'));
-    arms.push(new ServoArm(400, 138, 'Inhaler',    'inhaler',    4, 'BL'));
+    arms.push(new ServoArm(200, 138, 'Applicator',   'applicator',  2, 'BL'));
+    arms.push(new ServoArm(400,  88, 'Chemical', 'chemical', 3, 'TR'));
+    arms.push(new ServoArm(400, 138, 'Inhaler',    'inhaler',  4, 'BL'));
     window._twinArms = arms;
 
     twinBus.on('update_servo', function(data) {

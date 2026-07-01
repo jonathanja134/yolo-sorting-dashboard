@@ -2,7 +2,7 @@
 
 # YOLO MODEL 
 # can be replaced by "yolo11sV0", "yolo11nV1", "yolo26nV2", "yolo26nV3" or another model inside /my_model_ncnn_model
-Yolo_model = "yolo26nV3.2"
+Yolo_model = "yolo26nV4"
 
 # YOLO LABELS 
 

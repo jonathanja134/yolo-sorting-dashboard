@@ -61,10 +61,6 @@ void moveServo(int idx, int angle) {
   servoPos[idx] = angle;
 }
 
-// Returns true if the orange lamp should be on
-void updateOrangeLamp() {
-  digitalWrite(ORANGE_LAMP_PIN, (!systemRunning && !eStopActive) ? HIGH : LOW);
-}
 
 // UV INTERLOCK
 void readDoorSwitches() {
@@ -171,7 +167,7 @@ void startSystemMotor() {
     Serial.println("ACK:UV:OFF:DOOR_OPEN");
   }
 
-  updateOrangeLamp();
+
 }
 
 void stopSystemMotor(bool closeServos) {
@@ -191,7 +187,7 @@ void stopSystemMotor(bool closeServos) {
     }
   }
 
-  updateOrangeLamp();
+  
 }
 
 // START/STOP BUTTON
@@ -244,60 +240,92 @@ void readSensors() {
 
 // ACTUATION
 
+enum ActuationState { ACT_IDLE, ACT_OPENING, ACT_WAITING_SENSOR, ACT_CLOSING };
+
+ActuationState actState = ACT_IDLE;
+int            actIdx   = -1;
+unsigned long  actTimer = 0;
 
 // Core servo actuation: open, wait for sensor, close
-void runServo(int idx) {
-  Sensor &s   = sensors[0];
-  s.triggered = false;
-  int openPos = getOpenPos(idx);
-
-  moveServo(idx, openPos);
-  servoOpen[idx] = true;
-  Serial.println("SERVO:" + String(idx + 1) + ":OPEN:" + String(openPos) +
-                 ":CATEGORY:" + String(CATEGORY_NAMES[idx]) +
-                 ":CHANNEL:"  + String(SERVO_CHANNELS[idx]));
-
-  delay(SERVO_OPEN_MS);
-
-  // Wait for end-of-line sensor — used to log whether object was sorted
-  // Servos 0-1 use TIMEOUT_1, servos 2-3 use TIMEOUT_2
-  unsigned long start    = millis();
-  bool          detected = false;
-  unsigned long timeout  = (idx < 2) ? TIMEOUT_1 : TIMEOUT_2;
-
-  while (millis() - start < timeout) {
-    readEStop();
-    if (eStopActive) { detected = true; break; }
-    updateSensor(s);
-    if (s.triggered) { detected = true; break; }
+void startActuation(int idx) {
+  // If a servo is currently open, close it immediately before starting the new one
+  for (int i = 0; i < NB_SERVOS; i++) {
+    if (servoOpen[i]) {
+      moveServo(i, CLOSED_POS);
+      servoOpen[i] = false;
+    }
   }
 
-  moveServo(idx, CLOSED_POS);
-  servoOpen[idx] = false;
+  actIdx               = idx;
+  actState             = ACT_OPENING;
+  actTimer             = millis();
+  sensors[0].triggered = false;
 
-  Serial.println("SERVO:" + String(idx + 1) +
-                 (detected ? ":UNSORTED" : ":SORTED") +
+  int openPos = getOpenPos(idx);
+  moveServo(idx, openPos);
+  servoOpen[idx] = true;
+
+  Serial.println("SERVO:" + String(idx + 1) + ":OPEN:" + String(openPos) +
                  ":CATEGORY:" + String(CATEGORY_NAMES[idx]) +
                  ":CHANNEL:"  + String(SERVO_CHANNELS[idx]));
 }
 
-// Entry point for all actuation from readSerial
-void actuateServo(int idx) {
-  // If already actuating, close the current servo immediately and interrupt it
-  if (inActuation) {
-    for (int i = 0; i < NB_SERVOS; i++) {
-      if (servoOpen[i]) {
-        moveServo(i, CLOSED_POS);
-        servoOpen[i] = false;
-      }
-    }
+void updateActuation() {
+  if (actState == ACT_IDLE) return;
+
+  // E-stop aborts everything immediately
+  if (eStopActive) {
+    actState    = ACT_IDLE;
     inActuation = false;
+    return;
   }
 
-  // Run the new servo immediately
+  unsigned long now     = millis();
+  unsigned long elapsed = now - actTimer;
+
+  if (actState == ACT_OPENING) {
+    if (elapsed >= SERVO_OPEN_MS) {
+      actState = ACT_WAITING_SENSOR;
+      actTimer = now;
+    }
+    return;
+  }
+
+  if (actState == ACT_WAITING_SENSOR) {
+    // Wait for end-of-line sensor — used to log whether object was sorted
+    // Servos 0-1 use TIMEOUT_1, servos 2-3 use TIMEOUT_2
+    unsigned long timeout  = (actIdx == 0 || actIdx == 2) ? TIMEOUT_1 : TIMEOUT_2;
+    bool          detected = sensors[0].triggered || (elapsed >= timeout);
+
+    if (detected) {
+      bool sorted = !sensors[0].triggered; // timed out = not detected = sorted
+      Serial.println("SERVO:" + String(actIdx + 1) +
+                     (sorted ? ":SORTED" : ":UNSORTED") +
+                     ":CATEGORY:" + String(CATEGORY_NAMES[actIdx]) +
+                     ":CHANNEL:"  + String(SERVO_CHANNELS[actIdx]));
+
+      moveServo(actIdx, CLOSED_POS);
+      servoOpen[actIdx] = false;
+      actState          = ACT_CLOSING;
+      actTimer          = now;
+    }
+    return;
+  }
+
+  if (actState == ACT_CLOSING) {
+    // Small settling delay, then back to idle
+    if (elapsed >= 50) {
+      actState    = ACT_IDLE;
+      inActuation = false;
+    }
+    return;
+  }
+}
+
+// Entry point for all actuation from readSerial
+void actuateServo(int idx) {
   inActuation = true;
-  runServo(idx);
-  inActuation = false;
+  startActuation(idx);
 }
 
 // SERIAL PROTOCOL READER
@@ -366,7 +394,6 @@ void setup() {
 
   pinMode(POS_SENSOR_1,    INPUT);
   digitalWrite(MotorFw,         LOW); pinMode(MotorFw,         OUTPUT);
-  digitalWrite(ORANGE_LAMP_PIN, HIGH);pinMode(ORANGE_LAMP_PIN, OUTPUT);
   digitalWrite(UV_LAMP_PIN,     LOW); pinMode(UV_LAMP_PIN,     OUTPUT);
   pinMode(UV_BUTTON_PIN,   INPUT_PULLUP);
   pinMode(START_STOP_PIN,  INPUT_PULLUP);
@@ -394,7 +421,7 @@ void loop() {
   readStartStopButton();
   readUVButton();
   readDoorSwitches();
-  updateOrangeLamp();
   readSensors();
+  updateActuation();
   readSerial();
 }

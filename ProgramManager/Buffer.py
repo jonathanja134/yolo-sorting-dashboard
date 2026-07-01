@@ -186,16 +186,6 @@ class BufferManager:
 
     #  Read-only accessors for the inference loop overlay
 
-    @property
-    def collecting(self) -> bool:
-        "collection is always active on the overlay"
-        return True 
-
-    @property
-    def gap_counter(self) -> int:
-        "returns the gap counter for the overlay"
-        with self._lock:
-            return self._buf.gap_counter
 
     def snapshot(self) -> tuple[bool, list[str], int]:
         "Returns (collecting, vote_categories, gap_counter) for the CV overlay."

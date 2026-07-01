@@ -1,10 +1,12 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+ /*Glabals colors of the dashboard */
 :root {
   --bg: #f4f6f9;
   --surface: #ffffff;
   --border: #e4e8ef;
   --text-primary: #1a2035;
+  --header-height: 60px;
   --text-secondary: #6b7a99;
   --text-light: #9aa3b8;
   --shadow: 0 2px 12px rgba(26,32,53,0.07);
@@ -18,28 +20,30 @@
   --blue: #3b82f6;
   --radius: 14px;
 
-  /* ── 4 category colours ── */
-  --c-canister:   rgb(123, 123, 123);   /* light gray */
-  --c-chemical:   rgb(119, 46, 0);   /* dark blue  */
-  --c-applicator: rgb(18, 183, 0);   /* light beige */
-  --c-inhaler:    rgb(134, 206, 255);   /* dark red   */
-  --c-unsorted:   rgb(220, 38, 38);   /* red */
+  /*4 category colours */
+  --c-canister:   rgb(123, 123, 123);  
+  --c-chemical:   rgb(119, 46, 0);   
+  --c-applicator: rgb(18, 183, 0);  
+  --c-inhaler:    rgb(134, 206, 255); 
+  --c-unsorted:   rgb(220, 38, 38);  
 }
 
 body {
   font-family: 'DM Sans', sans-serif;
   background: var(--bg);
   color: var(--text-primary);
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-/* ── HEADER ── */
+/* HEADER  */
 header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 0 2rem;
-  height: 60px;
+  padding: 0 clamp(1rem, 2vw, 2rem);
+  height: var(--header-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -80,28 +84,29 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 
 .header-time { font-family: 'DM Mono', monospace; font-size: 0.8rem; color: var(--text-secondary); }
 
-/* ── DEBUG TOGGLE ── */
+/* DEBUG TOGGLE */
 .debug-control-btn{
   display: flex; align-items: center; gap: 20px;
 }
 .debug-control-header{
   display:flex;align-items:center;justify-content:space-between;
 }
-/* ── DASHBOARD GRID ── */
+/* DASHBOARD GRID  */
 .dashboard {
-  padding: 0.75rem 1.5rem;
-  display: flex; flex-direction: column; gap: 0.55rem;
+  padding: clamp(0.6rem, 1vw, 1.2rem);
+  display: flex; flex-direction: column; gap: clamp(0.4rem, 0.8vw, 0.55rem);
   width: 100%;
-  height: 100%;
-  overflow: hidden;
+  min-height: 0;
+  height: auto;
+  overflow: visible;
 }
 
-.top-row    { display: grid; grid-template-columns: 2fr 1fr; gap: 0.55rem; flex: 1 1 0; min-height: 0; }
+.top-row    { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); gap: 0.55rem; flex: 1 1 auto; min-height: min(42vh, 400px); }
 .warning-full { width: 100%; flex-shrink: 0; }
-.middle-row { display: grid; grid-template-columns: 1fr 1.5fr; gap: 0.55rem; min-height: 0; }
-.bottom-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.55rem; flex-shrink: 0; }
+.middle-row { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr); gap: 0.55rem; min-height: clamp(280px, 32vh, 360px); }
+.bottom-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.55rem; flex-shrink: 0; }
 
-/* ── CARD BASE ── */
+/* CARD BASE */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -109,6 +114,8 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   padding: 0.85rem 1.1rem;
   box-shadow: var(--shadow);
   transition: box-shadow 0.2s;
+  min-width: 0;
+  min-height: 0;
 }
 .card:hover { box-shadow: var(--shadow-hover); }
 
@@ -118,10 +125,10 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   color: var(--text-secondary); margin-bottom: 0.55rem;
 }
 
-/* ── PIE CARD ── */
+/*  PIE  */
 .pie-card { display: flex; flex-direction: column; height: 100%; }
-.pie-wrapper { display: flex; align-items: center; gap: 2.5rem; flex: 1; min-height: 0; }
-.pie-container { position: relative; height: 100%; aspect-ratio: 1; max-height: 240px; flex-shrink: 0; }
+.pie-wrapper { display: flex; align-items: center; gap: clamp(1rem, 2vw, 2.5rem); flex: 1; min-height: 0; flex-wrap: wrap; justify-content: center; }
+.pie-container { position: relative; width: min(100%, clamp(180px, 24vw, 260px)); height: auto; aspect-ratio: 1; max-height: min(34vh, 240px); flex-shrink: 0; }
 .pie-center {
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%); text-align: center;
@@ -136,10 +143,11 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .legend-count { font-size: 0.65rem; color: var(--text-secondary); font-family: 'DM Mono', monospace; }
 .legend-pct   { font-size: 0.72rem; font-weight: 600; font-family: 'DM Mono', monospace; color: var(--text-secondary); }
 
-/* ── VIDEO CARD ── */
+/* VIDEO Box */
 .video-card { display: flex; flex-direction: column; height: 100%; }
 .video-wrapper {
   position: relative; flex: 1; min-height: 0;
+  min-height: 260px;
   background: #0a0a0f; border-radius: 10px; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
 }
@@ -151,7 +159,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 }
 .stream-status.hidden { display: none; }
 
-/* ── WARNING ── */
+/*  WARNING  */
 .warning-card {
   background: #fffbeb; border: 1px solid #fde68a;
   border-left: 4px solid #f59e0b; padding: 0.45rem 0.85rem;
@@ -162,12 +170,13 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .warning-message{ font-size: 0.72rem; color: #78350f; line-height: 1.35; white-space: pre-line; }
 .warning-message.warning-error{ color: #b91c1c; }
 
-/* ── CONVEYOR ── */
+/* CONVEYOR */
 .conveyor-card  { display: flex; flex-direction: column; height: 100%; }
-.conveyor-list  { display: flex; flex-direction: row; gap: 0.75rem; flex: 1; justify-content: center; }
+.conveyor-list  { display: flex; flex-direction: row; flex-wrap: wrap; gap: 0.75rem; flex: 1; justify-content: center; align-items: stretch; }
 .conveyor-item  {
   background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
   padding: 0.5rem 0.75rem; display: flex; align-items: center; gap: 0.6rem;
+  flex: 1 1 180px;
 }
 .conveyor-status-btn {
   width: 36px; height: 36px; border-radius: 50%; border: none; cursor: default;
@@ -195,7 +204,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .conveyor-action-btn.disabled-btn:hover { background: var(--border); }
 .conveyor-status-btn.disconnected { background: #e5e7eb; box-shadow: 0 0 0 3px rgba(107,114,128,0.15); }
 
-/* ── SORTING RATE ── */
+/*  SORTING RATE */
 .rate-card { text-align: center; padding: 1.25rem; margin-bottom: 1.25rem; }
 .rate-card .card-title { margin-bottom: 0.5rem; }
 .rate-value { font-size: 3rem; font-weight: 700; color: var(--text-primary); line-height: 1; font-family: 'DM Mono', monospace; letter-spacing: -0.03em; }
@@ -207,11 +216,11 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 }
 .unrecognized-rate { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 10px; font-size: 0.78rem; color: #ef4444; font-weight: 500; }
 
-/* ── SERVOS ── */
+/*  SERVOS */
 .servo-card { display: flex; flex-direction: column; height: 100%; }
 .servo-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
   flex: 1;
   align-content: stretch;
@@ -224,7 +233,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   min-width: 0;
 }
 
-/* Active servo row highlight — one class per category */
+/* Active servo row highlight */
 .servo-item.active-applicator { border-color: var(--c-applicator); background: #eff6ff; }
 .servo-item.active-inhaler    { border-color: var(--c-inhaler);    background: #faf5ff; }
 .servo-item.active-chemical   { border-color: var(--c-chemical);   background: #e0f2fe; }
@@ -244,7 +253,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .servo-status.active   { background: var(--green-bg); color: #15803d; }
 .servo-status.inactive { background: #f1f5f9; color: var(--text-secondary); }
 
-/* ── COUNT CARDS ── */
+/*  COUNT CARDS  */
 .count-card { padding: 0.65rem 0.85rem; border-top: 3px solid; }
 .count-card .card-title { margin-bottom: 0.35rem; }
 .count-number { font-size: 1.75rem; font-weight: 700; font-family: 'DM Mono', monospace; letter-spacing: -0.03em; line-height: 1; }
@@ -258,7 +267,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   pointer-events: none;
 }
 
-/* ── UNRECOGNIZED ALERT ── */
+/*  UNRECOGNIZED ALERT  */
 .unrecognized-alert {
   display: flex; align-items: center; gap: 8px;
   background: #fef2f2; border: 1px solid #fecaca;
@@ -272,9 +281,8 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ══════════════════════════════════════════
    DEBUG PANEL
-   ══════════════════════════════════════════ */
+
 
 .debug-row { width: 100%; display: none; }
 #debug-panel { display: none; }
@@ -335,9 +343,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .dbg-pct   { font-family: 'DM Mono', monospace; font-size: 0.78rem; font-weight: 700; color: var(--text-primary); min-width: 36px; text-align: right; }
 
 
-/* ══════════════════════════════════════════
-   EVENT LOG (bottom bar)
-   ══════════════════════════════════════════ */
+/*EVENT LOG (bottom bar)*/
 
 /* #debug-log-panel visibility controlled by JS */
 
@@ -412,24 +418,22 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .log-time    { color: var(--text-secondary); font-size: 0.68rem; }
 
 
-/* ══════════════════════════════════════════
-   DASHBOARD LAYOUT — main + bottom log
-   ══════════════════════════════════════════ */
+/* DASHBOARD LAYOUT — main + bottom log */
 
 .dashboard-layout {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 60px);
-  overflow: hidden;
+  min-height: calc(100dvh - var(--header-height));
+  overflow: visible;
 }
 
 .dashboard-main {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
-/* ── BOTTOM LOG BAR ── */
+/*  BOTTOM LOG BAR  */
 .dashboard-log-bar {
   flex-shrink: 0;
   height: 130px;
@@ -484,7 +488,7 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
   color: var(--text-secondary);
   font-size: 0.66rem;
 }
-/* ── Log filter bar ─────────────────────────────── */
+/* Log filter bar  */
 .log-filter-bar {
   display: flex;
   flex-wrap: nowrap;
@@ -520,13 +524,13 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 .log-filter-btn[data-filter="sensor"].active { background: #9333ea; }
 .log-filter-btn[data-filter="conveyor"].active { background: #0891b2; }
 .log-filter-btn[data-filter="error"].active  { background: #dc2626; }
-/* ── Log row category colours ──────────────────── */
+/*  Log row category colours  */
 .log-row-detection td:nth-child(2) { color: #4ade80; }
 .log-row-servo      td:nth-child(2) { color: #60a5fa; }
 .log-row-sensor     td:nth-child(2) { color: #c084fc; }
 .log-row-conveyor   td:nth-child(2) { color: #22d3ee; }
 .log-row-error      td:nth-child(2) { color: #f87171; font-weight: 600; }
-/* --   STATUS LAMPS BAR -- */
+/*  STATUS LAMPS BAR */
 .lamps-bar {
   display: flex;
   align-items: center;
@@ -577,3 +581,63 @@ header h1 { font-size: 1rem; font-weight: 600; color: var(--text-primary); lette
 #lamp-orange{ --lamp-color: #f97316; }
 #lamp-green { --lamp-color: #22c55e; }
 #lamp-blue  { --lamp-color: #3b82f6; }
+
+@media (max-width: 1200px) {
+  .top-row,
+  .middle-row {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .bottom-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pie-wrapper {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --header-height: 56px;
+  }
+
+  body {
+    overflow-y: auto;
+  }
+
+  .dashboard {
+    padding: 0.6rem;
+    overflow: auto;
+  }
+
+  .dashboard-layout {
+    height: auto;
+    min-height: calc(100dvh - var(--header-height));
+  }
+
+  .lamps-bar {
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .bottom-row,
+  .servo-list {
+    grid-template-columns: 1fr;
+  }
+
+  .conveyor-list {
+    flex-direction: column;
+  }
+
+  .video-wrapper {
+    min-height: 220px;
+  }
+
+  .pie-container {
+    width: min(100%, 220px);
+    max-height: 220px;
+  }
+}
