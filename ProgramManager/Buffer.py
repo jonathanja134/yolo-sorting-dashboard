@@ -118,11 +118,11 @@ class BufferManager:
         category   = result["winner"]
         confidence = result["confidence"]
 
-        self._set_active_servo(category, time.time() + 10.0)#10 seconds safety cap
+        self._set_active_servo(category, time.time() + 10.0)#10 seconds timeout for safety cap
 
         #Send the category result thought the serial to the arduino for actuation using the serial protocal 
         self._serial_send(f"LABEL:{category}")
-        #send detection to the dashboard for log 
+        # send detection to the dashboard for log 
         self._emit("yolo_detection", {
             "label":        category,
             "confidence":   confidence,

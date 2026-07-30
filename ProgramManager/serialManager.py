@@ -42,7 +42,7 @@ def serial_reader(serial_manager, emit_fn, servo_index_to_category, set_active_s
     while True:
         current_connected = serial_manager.serial_ok()
 
-        # ── Emit connection state changes ──────────────────────────────────────
+        #  Emit connection state changes 
         if current_connected != last_connection_state:
             last_connection_state = current_connected
             if current_connected:
@@ -295,7 +295,6 @@ def serial_reader(serial_manager, emit_fn, servo_index_to_category, set_active_s
 
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 
 class SerialManager:
     """
@@ -332,7 +331,7 @@ class SerialManager:
         )
         self._reconnect_thread.start()
 
-    # ── PORT DETECTION ────────────────────────────────────────────────────────
+    #  PORT DETECTION 
 
     @staticmethod
     def _is_arduino_port(device: str) -> bool:

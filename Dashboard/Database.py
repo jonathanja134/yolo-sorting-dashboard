@@ -147,7 +147,7 @@ def save_conveyor(conv_id, running):
     conn.commit()
     conn.close()
 
-# ══════════════════════════════════════════
+
 #  SERVOS
 
 def get_servos():

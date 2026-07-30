@@ -279,7 +279,7 @@ def handle_servo_closed(data):
     })
 
 
-#  Servo object detected  (informational relay)
+#  Servo object detected 
 
 @socketio.on("servo_object_detected")
 def handle_servo_object_detected(data):
@@ -293,7 +293,6 @@ def handle_servo_object_detected(data):
 
 
 #  Arduino connection status (Pi tracking) 
-# Shows when Arduino is connected / disconnected to disable/enable conveyor controls
 
 @socketio.on("arduino_connection")
 def handle_arduino_connection(data):

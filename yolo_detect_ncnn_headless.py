@@ -1,5 +1,6 @@
 """
-yolo_detect_ncnn_headless.py ( YOLO inference +  buffer vote + serial protocol (Pi ↔ Arduino) + SocketIO → Flask + WebSocket Stream 
+yolo_detect_ncnn_headless.py 
+YOLO inference +  buffer vote + serial protocol (Pi ↔ Arduino) + Dashboard connection + streaam
 
 Category to Servo  mapping across all files:
   canister   → Servo 1 – pin 12
@@ -7,15 +8,6 @@ Category to Servo  mapping across all files:
   applicator → Servo 3 – pin 14
   inhaler    → Servo 4 – pin 15
 
-Serial protocol (Arduino → Pi):
-
-  SENSOR:1:TRIGGERED / CLEAR
-  SENSOR:2:TRIGGERED / CLEAR
-  ACK:MOTOR:FORWARD / STOP
-  ACK:LABEL:<category>
-  SERVO:X:OPEN / CLOSED_OK / CLOSED_TIMEOUT / OBJECT_DETECTED / BLOCKED
-  ERR:<detail>
-  INFO:<detail>
 """
 import serial, os, numpy as np, time, sys, termios, ncnn, cv2, threading, asyncio, websockets
 from collections import Counter
@@ -53,7 +45,7 @@ def _set_conveyor_state(running):
 
 # SocketIO → dashboard (before model load so startup errors are delivered) 
 socket_mgr = SocketManager(
-    server_url=DASHBOARD_URL,
+    server_url=DASHBOARD_URL, #moved to variable for easier editing and consstency
     get_conveyor_fn=_get_conveyor_state,
     set_conveyor_fn=_set_conveyor_state,
     serial_send_fn=serial.send,
@@ -80,12 +72,13 @@ net.opt.use_fp16_arithmetic = True
 net.opt.use_packing_layout  = True
 
 if net.load_param(param_file) != 0:
+    # raaise error to the dashboard
     error_mgr.raise_error("MODEL_LOAD_FAILED", {
         "stage": "load_param",
         "file": param_file,
         "model": Yolo_model,
     })
-    time.sleep(1.0)
+    time.sleep(1.0) # wait a bit so the dashboard can receive the error instead of printing error on success
     raise RuntimeError(f"Failed to load PARAM: {param_file}")
 if net.load_model(bin_file) != 0:
     error_mgr.raise_error("MODEL_LOAD_FAILED", {
@@ -93,7 +86,7 @@ if net.load_model(bin_file) != 0:
         "file": bin_file,
         "model": Yolo_model,
     })
-    time.sleep(1.0)
+    time.sleep(1.0) # idem as line 81
     raise RuntimeError(f"Failed to load BIN: {bin_file}")
 error_mgr.resolve_error("MODEL_LOAD_FAILED")
 print("~ 2 Model loaded OK")
@@ -101,11 +94,13 @@ print("~ 2 Model loaded OK")
 # Camera 
 picam = Picamera2()
 picam.configure(picam.create_video_configuration(main={"size": (input_size, input_size), "format": "RGB888"}))
-picam.set_controls({"AeEnable": False,"AnalogueGain": 3,"ExposureTime": 10000,}) # camera ISP settings
+# NOTE: camera ISP settings ; These AnalogueGain/ExposureTime match the lab lighting and need to be fix 
+# as autoexposure creates overbright image when light get's reflected on white devices 
+picam.set_controls({"AeEnable": False,"AnalogueGain": 3,"ExposureTime": 10000,}) 
 
  #Wider FOV to crop the full sensor width into a square, then scale to input_size
 sensor_w, sensor_h = picam.sensor_resolution
-crop_size = min(sensor_w, sensor_h)   # largest square = widest FOV
+crop_size = min(sensor_w, sensor_h)   # largest square for a widest FOV
 x = (sensor_w - crop_size) // 2
 y = (sensor_h - crop_size) // 2
 picam.set_controls({"ScalerCrop": (x, y, crop_size, crop_size)})
@@ -113,7 +108,7 @@ picam.set_controls({"ScalerCrop": (x, y, crop_size, crop_size)})
 picam.start()
 print("~ 3 Camera OK")
 
-# Connect Serial after ErrorManager is ready 
+# Connect Serial after the ErrorManager is ready 
 serial.connect(port=PORT, emit_fn=_async_emit)
 print("~ 4 Serial connection attempted")
 
@@ -132,7 +127,7 @@ def _set_active_servo(category, until_ts):
         active_servo       = category
         active_servo_until = until_ts
 
-# Buffer Manager 
+# Buffer Manager thread
 buf_mgr = BufferManager(
     min_frames       = min_frames,
     gap_limit        = gap_limit,
@@ -194,7 +189,7 @@ encode_event = threading.Event()
 STREAM_WIDTH   = 480
 STREAM_HEIGHT  = 320
 STREAM_QUALITY = 35       # JPEG quality implicitto reduced  for speed
-
+#
 def encoder_thread_fn():
     """Runs in a background thread. Waits for a signal 
     (encode_event) that a new frame is ready, then resizes 
@@ -213,14 +208,14 @@ def encoder_thread_fn():
             )
         with encoded_lock:
             encoded_buf = buf_jpg.tobytes()
-            encoded_seq += 1                 # ← signal that a new frame is ready
+            encoded_seq += 1                 # signal that a new frame is ready
 
 threading.Thread(target=encoder_thread_fn, daemon=True).start()
 
 # WebSocket server 
 async def yolo_handler(ws):
     print(f"WS client: {ws.remote_address}")
-    last_sent_seq = -1   # ← track which seq this client last received
+    last_sent_seq = -1   # track which seq this client last received
     try:
         while True:
             with encoded_lock:
@@ -233,7 +228,7 @@ async def yolo_handler(ws):
                 except asyncio.TimeoutError:
                     pass
 
-            await asyncio.sleep(0.033) 
+            await asyncio.sleep(0.033) # to have a consistent ~30 FPS  stream
     except websockets.exceptions.ConnectionClosed:
         pass
 
@@ -244,7 +239,8 @@ async def run_ws_server():
 
 threading.Thread(target=lambda: asyncio.run(run_ws_server()), daemon=True).start()
 
-# Main inference loop 
+# Main inference loop that runs in the main thread detecting objects, 
+# feeding the buffer, and drawing the results on the frame
 
 fps_buffer = []
 prev_t     = None
@@ -297,14 +293,14 @@ try:
         # with the detected device category (or unrecognized ) and weight using the .add() function
         if detections:
             best = max(detections, key=lambda d: d[4])
-            cid  = int(best[5])
-            cat  = LABEL_TO_CATEGORY.get(cid, "unrecognized").lower()
+            cid  = int(best[5]) # retrieve the class ID of the best detection
+            cat  = LABEL_TO_CATEGORY.get(cid, "unrecognized").lower() # map it into string category
             buf_mgr.add(cat, weight=float(best[4]))
         else:
-            # in case of no detected device we feed the gap limit using .no_detectlion()
+            # in case no detected device we feed gap limit using .no_detectlion()
             buf_mgr.no_detection()
 
-        # Detection draw 
+        # Detection draw bouunding boxes and labels on the frame
         for d in detections:
             x1, y1, x2, y2, conf, cid = d
             cid = int(cid)
@@ -314,7 +310,7 @@ try:
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, lbl, (x1, max(y1-5, 10)),cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        # Buffer overlay  
+        # Buffer overlay  printing the current buffer state on the frame
         collecting, votes_snap, gap_snap = buf_mgr.snapshot()
         if collecting:
             c_snap = Counter(votes_snap)

@@ -175,5 +175,13 @@ ERROR_CATALOG = {
         "title": "Unknown Error",
         "message": "An unexpected error occurred.",
         "action": "Check logs for more details.",
-    },  
+    }, 
+    "MODEL_LOAD_FAILED": {
+        "code": "YOLO_001",
+        "severity": ErrorSeverity.ERROR,
+        "source": ErrorSource.YOLO,
+        "title": "YOLO Model Load Failed",
+        "message": "Failed to load YOLO model.",
+        "action": "Check model file and configuration.",
+    },
 }

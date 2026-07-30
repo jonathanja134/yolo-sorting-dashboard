@@ -4,15 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Sorting Dashboard</title>
-  <!-- Local assets — dashboard works without internet (no CDN) -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="/static/js/vendor/chart.umd.min.js"></script>
   <script src="/static/js/vendor/socket.io.min.js"></script>
   <link rel="stylesheet" href="/static/css/style.css"/>
 </head>
 <body>
-
-<!-- HEADER -->
 <header>
   <div class="header-left">
     <h1>Sorting Control Dashboard</h1>
@@ -23,7 +20,6 @@
     <div class="header-time" id="clock">--:--:--</div>
   </div>
 </header>
-
 <div class="dashboard-layout">
 <div class="dashboard-main">
 <div class="dashboard">
@@ -47,7 +43,7 @@
     <span class="lamp-label">UV Light</span>
   </div>
 </div>
-  <!-- ── ROW 1: Pie | Video ── -->
+  <!-- ROW 1: Pie | Video -->
   <div class="top-row">
 
     <div class="card pie-card">
@@ -114,7 +110,7 @@
 
   </div>
 
-  <!-- ── ROW 2: Warning ── -->
+  <!--  ROW 2: Warning  -->
   <div class="card warning-card warning-full">
     <div class="warning-header">
       <svg class="warning-icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round">
@@ -126,7 +122,7 @@
     <div class="warning-message" id="warning-message"></div>
   </div>
 
-  <!-- ── ROW 3: Debug panel (hidden by default) ── -->
+  <!--  ROW 3: Debug panel  -->
   <div class="debug-row" id="debug-panel">
     <div class="card">
       <div class="card-title">Buffer Debug — Live Vote Breakdown</div>
@@ -153,7 +149,7 @@
     </div>
   </div>
 
-  <!-- ── ROW 4: Conveyors | Sorting Rate | Servos ── -->
+  <!--  ROW 4: Conveyors | Sorting Rate | Servos  -->
   <div class="middle-row">
 
     <div class="card conveyor-card">
@@ -261,7 +257,7 @@
 
   </div>
 
-  <!-- ── ROW 5: Count cards ── -->
+  <!--  ROW 5: Count cards  -->
   <div class="bottom-row">
 
     <div class="card count-card" style="border-top-color: var(--c-applicator);">
@@ -314,7 +310,7 @@
 </div><!-- end .dashboard -->
 </div><!-- end .dashboard-main -->
 
-<!-- ── BOTTOM: Event Log ── -->
+<!--   BOTTOM: Evennt Log  -->
 <div class="dashboard-log-bar" id="debug-log-panel">
   <div class="card log-bar-card">
     <div class="log-bar-header">
@@ -381,12 +377,12 @@
   };
   ws.onclose = () => {
     if (connected) {
-      wsStreamStatus.textContent = '⚠ Stream disconnected';
+      wsStreamStatus.textContent = 'Stream disconnected';
       wsStreamStatus.classList.remove('hidden');
     }
   };
   ws.onerror = () => {
-    wsStreamStatus.textContent = '⚠ Connection error';
+    wsStreamStatus.textContent = 'Connection error';
     wsStreamStatus.classList.remove('hidden');
   };
 </script>

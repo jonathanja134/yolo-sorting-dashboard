@@ -71,7 +71,7 @@ SERVO_COLOR = {
 
 # MODEL / INFERENCE SETTINGS 
 input_size = 320
-conf_thresh = 0.5
+conf_thresh = 0.8
 nms_thresh = 0.45
 
 # BUFFER SETTINGS 
@@ -82,7 +82,7 @@ gap_limit = 20
 BAUD = 115200 
 PORT = "/dev/ttyACM0"
 SOCKET_PORT = 5000
-# Use 127.0.0.1 (not localhost) so Pi with dashboard connection worksion works with no Ethernet/Wi‑Fi
+# Use 127.0.0.1 (not localhost) so Pi with dashboard connection works with no Ethernet/Wi‑Fi
 DASHBOARD_URL = "http://127.0.0.1:5000"
 
 # CONVEYOR 
@@ -91,10 +91,10 @@ CONVEYOR_ID = "conveyor_1"
 CONVEYOR_PIN = 10
 CONVEYOR_PINS = {CONVEYOR_ID: CONVEYOR_PIN}
 
-# CONVEYOR 1 centre-trigger window
-CENTER_X_MIN = 130   
-CENTER_X_MAX = 190  
-CONVEYOR_STOP_COOLDOWN = 1.5  # seconds between stop commands
+# CONVEYOR 1 centre-trigger window ;used to stop conveyorwhen device being processed and other devce incoming but not fully functionnal
+#CENTER_X_MIN = 130   
+#CENTER_X_MAX = 190  
+# CONVEYOR_STOP_COOLDOWN = 1.5  # seconds between stop commands
 
 def normalize_conveyor_db_id(raw, default=1):
     " we only have one conveyor so the id is always 1 "

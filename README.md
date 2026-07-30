@@ -162,7 +162,7 @@ Multiple errors can also occurs therefore they are also printed by the arduino t
 | `ERR:SERIAL_PARSE_ERROR`      | Fail parsing the data                               |
 | `ERR:SERIAL_WRITE_ERROR`      | Fail reading the data                               |
 | `ERR:SERIAL_CONNECT_FAILED`   | Serial connection failed                            |
-| `ERR:UNKNOWN_CMD`             | Command format not recognized                       |
+| `ERR:UNKNOWN_CMD`             | Command format or content not recognized            |
 | `ERR:BAD_CATEGORY:<category>` | Label does not match known categories               |
 | `ERR:UNWIRING_DETECTED`       | Servo wiring detected as missing or unstable        |
 
@@ -243,5 +243,5 @@ the system is started on the boot automaticaly but can be stoped and restarted u
 Start YOLO: `sudo systemctl start yolo.service`  
 Stop YOLO: `sudo systemctl stop yolo.service`
 
-Start the Dashboard: `sudo systemctl start dashboard.service`  
-Stop the Dashboard: `sudo systemctl stop dashboard.service`
+Start the Dashboard: `sudo systemctl start Dashboard.service`  
+Stop the Dashboard: `sudo systemctl stop Dashboard.service`

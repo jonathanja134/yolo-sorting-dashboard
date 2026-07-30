@@ -11,4 +11,5 @@ images_captured/
 *.log
 note.ipynb
 system-site-packages
+image_capture.py
 
